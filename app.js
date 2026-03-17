@@ -5,7 +5,7 @@
   const authConfig = config.auth || {};
   const uploadConfig = config.uploads || {};
   const tokenStorageKey = authConfig.tokenStorageKey || "upload_admin_token";
-  const cookieSessionKey = authConfig.cookieSessionKey || `${tokenStorageKey}_session`;
+  const deviceIdStorageKey = authConfig.deviceIdStorageKey || "upload_admin_device_id";
 
   const routes = {
     login: "#/login",
@@ -27,35 +27,16 @@
   }
 
   function setToken(token) {
-    if (!token) {
-      return;
+    if (token) {
+      window.localStorage.setItem(tokenStorageKey, token);
     }
-
-    window.localStorage.setItem(tokenStorageKey, token);
-  }
-
-  function setCookieSession() {
-    window.sessionStorage.setItem(cookieSessionKey, "active");
-  }
-
-  function clearToken() {
-    window.localStorage.removeItem(tokenStorageKey);
-  }
-
-  function clearCookieSession() {
-    window.sessionStorage.removeItem(cookieSessionKey);
   }
 
   function clearAuth() {
-    clearToken();
-    clearCookieSession();
+    window.localStorage.removeItem(tokenStorageKey);
   }
 
   function isAuthenticated() {
-    if (authConfig.mode === "cookie") {
-      return window.sessionStorage.getItem(cookieSessionKey) === "active";
-    }
-
     return Boolean(getToken());
   }
 
@@ -107,14 +88,6 @@
     }
   }
 
-  function parseJsonSafe(value) {
-    try {
-      return JSON.parse(value);
-    } catch (error) {
-      return value ? { raw: value } : null;
-    }
-  }
-
   function getErrorMessage(payload, fallback) {
     const configured = getValueByPath(payload, authConfig.errorResponseField || uploadConfig.errorResponseField);
     if (configured) {
@@ -130,18 +103,16 @@
   }
 
   function getAuthHeaders() {
-    const headers = {};
-
-    if (authConfig.mode !== "cookie") {
-      const token = getToken();
-      if (token) {
-        const authHeaderName = authConfig.authHeaderName || "Authorization";
-        const authScheme = authConfig.authScheme || "Bearer";
-        headers[authHeaderName] = authScheme ? `${authScheme} ${token}` : token;
-      }
+    const token = getToken();
+    if (!token) {
+      return {};
     }
 
-    return headers;
+    const authHeaderName = authConfig.authHeaderName || "Authorization";
+    const authScheme = authConfig.authScheme || "Bearer";
+    return {
+      [authHeaderName]: authScheme ? `${authScheme} ${token}` : token
+    };
   }
 
   function renderStatus(status) {
@@ -150,6 +121,74 @@
     }
 
     return `<div class="status status-${escapeHtml(status.type || "info")}">${escapeHtml(status.message)}</div>`;
+  }
+
+  function renderMultiResults(results) {
+    if (!results || !results.length) {
+      return "";
+    }
+
+    return `
+      <div class="stack">
+        ${results
+          .map(function (result) {
+            const outcomeClass = result.success ? "success" : "error";
+            const outcomeLabel = result.success ? "Uploaded" : "Failed";
+            const detail = result.message ? `: ${escapeHtml(result.message)}` : "";
+
+            return `
+              <div class="status status-${outcomeClass}">
+                <strong>${outcomeLabel}</strong> ${escapeHtml(result.name)}${detail}
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+    `;
+  }
+
+  function getOrCreateDeviceId() {
+    const existing = window.localStorage.getItem(deviceIdStorageKey);
+    if (existing) {
+      return existing;
+    }
+
+    const deviceId = `browser-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    window.localStorage.setItem(deviceIdStorageKey, deviceId);
+    return deviceId;
+  }
+
+  function buildClipFormData(iosUserId, name, file) {
+    const formData = new window.FormData();
+    formData.append(uploadConfig.iosUserIdField || "iosUserId", iosUserId);
+    formData.append(uploadConfig.titleField || "name", name);
+    formData.append(uploadConfig.singleFileField || "file", file);
+    return formData;
+  }
+
+  function getDefaultClipName(file) {
+    return file.name.replace(/\.[^/.]+$/, "") || file.name;
+  }
+
+  async function uploadSingleClip(iosUserId, name, file) {
+    const response = await window.fetch(getApiUrl(uploadConfig.singlePath || "/iosclips"), {
+      method: "POST",
+      headers: getAuthHeaders(),
+      credentials: uploadConfig.withCredentials ? "include" : "same-origin",
+      body: buildClipFormData(iosUserId, name, file)
+    });
+
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        clearAuth();
+      }
+
+      throw new Error(getErrorMessage(payload, "Clip upload failed."));
+    }
+
+    return payload;
   }
 
   function renderLogin(status) {
@@ -164,8 +203,8 @@
           ${renderStatus(status)}
           <form id="loginForm" class="stack">
             <div class="field">
-              <label for="username">Username</label>
-              <input id="username" name="username" type="text" autocomplete="username" required />
+              <label for="login">Username or Email</label>
+              <input id="login" name="login" type="text" autocomplete="username" required />
             </div>
             <div class="field">
               <label for="password">Password</label>
@@ -179,8 +218,7 @@
       </section>
     `;
 
-    const form = document.getElementById("loginForm");
-    form.addEventListener("submit", handleLoginSubmit);
+    document.getElementById("loginForm").addEventListener("submit", handleLoginSubmit);
   }
 
   function renderDashboard() {
@@ -199,7 +237,7 @@
         <article class="panel dashboard-card">
           <div class="stack">
             <h2>Upload Multiple Clips</h2>
-            <p>Send a batch of files and monitor the upload progress.</p>
+            <p>Send files one at a time to the existing upload endpoint.</p>
           </div>
           <div class="actions">
             <button id="goMulti" class="primary-button" type="button">Open</button>
@@ -224,13 +262,17 @@
         <div class="stack">
           <div class="stack">
             <h2>Upload Single Clip</h2>
-            <p>Send one clip with its title.</p>
+            <p>Send one clip with its iOS user ID, name, and file.</p>
           </div>
           ${renderStatus(status)}
           <form id="singleUploadForm" class="stack">
             <div class="field">
-              <label for="clipTitle">Title</label>
-              <input id="clipTitle" name="clipTitle" type="text" required />
+              <label for="singleIosUserId">iOS User ID</label>
+              <input id="singleIosUserId" name="singleIosUserId" type="text" required />
+            </div>
+            <div class="field">
+              <label for="clipName">Name</label>
+              <input id="clipName" name="clipName" type="text" required />
             </div>
             <div class="field">
               <label for="singleClipFile">Clip File</label>
@@ -254,17 +296,23 @@
   function renderMultiUpload(state) {
     const status = state && state.status;
     const progress = state && typeof state.progress === "number" ? state.progress : 0;
-    const fileCount = state && state.fileCount ? state.fileCount : 0;
+    const fileCount = state && typeof state.fileCount === "number" ? state.fileCount : 0;
+    const results = (state && state.results) || [];
+
     logoutButton.classList.remove("hidden");
     app.innerHTML = `
       <section class="panel form-panel">
         <div class="stack">
           <div class="stack">
             <h2>Upload Multiple Clips</h2>
-            <p>Select multiple files and upload them in one request.</p>
+            <p>Uploads are sent sequentially to the existing single upload endpoint.</p>
           </div>
           <div id="multiUploadStatus">${renderStatus(status)}</div>
           <form id="multiUploadForm" class="stack">
+            <div class="field">
+              <label for="multiIosUserId">iOS User ID</label>
+              <input id="multiIosUserId" name="multiIosUserId" type="text" required />
+            </div>
             <div class="field">
               <label for="multiClipFiles">Clip Files</label>
               <input id="multiClipFiles" name="multiClipFiles" type="file" multiple required />
@@ -272,12 +320,13 @@
             <div class="progress-wrap">
               <div class="meta-row">
                 <span id="multiFileCount">${fileCount} file${fileCount === 1 ? "" : "s"} selected</span>
-                <span id="multiProgressText">${progress}% uploaded</span>
+                <span id="multiProgressText">${progress}% complete</span>
               </div>
               <div class="progress-bar" aria-hidden="true">
                 <div id="multiProgressValue" class="progress-value" style="width: ${progress}%;"></div>
               </div>
             </div>
+            <div id="multiUploadResults">${renderMultiResults(results)}</div>
             <div class="actions">
               <button id="multiUploadSubmitButton" class="primary-button" type="submit">Submit</button>
               <button id="backToDashboardMulti" class="secondary-button" type="button">Back</button>
@@ -292,7 +341,8 @@
       updateMultiUploadState({
         progress: 0,
         fileCount: event.target.files.length,
-        status: status
+        status: status,
+        results: []
       });
     });
     document.getElementById("backToDashboardMulti").addEventListener("click", function () {
@@ -302,12 +352,13 @@
 
   function updateMultiUploadState(state) {
     const progress = state && typeof state.progress === "number" ? state.progress : 0;
-    const fileCount = state && state.fileCount ? state.fileCount : 0;
+    const fileCount = state && typeof state.fileCount === "number" ? state.fileCount : 0;
     const statusHost = document.getElementById("multiUploadStatus");
     const fileCountNode = document.getElementById("multiFileCount");
     const progressNode = document.getElementById("multiProgressText");
     const progressValue = document.getElementById("multiProgressValue");
     const submitButton = document.getElementById("multiUploadSubmitButton");
+    const resultsHost = document.getElementById("multiUploadResults");
 
     if (statusHost) {
       statusHost.innerHTML = renderStatus(state && state.status);
@@ -318,11 +369,15 @@
     }
 
     if (progressNode) {
-      progressNode.textContent = `${progress}% uploaded`;
+      progressNode.textContent = `${progress}% complete`;
     }
 
     if (progressValue) {
       progressValue.style.width = `${progress}%`;
+    }
+
+    if (resultsHost) {
+      resultsHost.innerHTML = renderMultiResults(state && state.results);
     }
 
     if (submitButton && typeof state?.isSubmitting === "boolean") {
@@ -334,24 +389,24 @@
     event.preventDefault();
     const form = event.currentTarget;
     const submitButton = form.querySelector('button[type="submit"]');
-    const username = form.username.value.trim();
+    const login = form.login.value.trim();
     const password = form.password.value;
-    const usernameField = authConfig.usernameField || "username";
-    const passwordField = authConfig.passwordField || "password";
+    const deviceId = getOrCreateDeviceId();
 
     submitButton.disabled = true;
     renderLogin({ type: "info", message: "Signing in..." });
 
     try {
-      const response = await window.fetch(getApiUrl(authConfig.loginPath || "/api/admin/auth/login"), {
+      const response = await window.fetch(getApiUrl(authConfig.loginPath || "/auth/login"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         credentials: authConfig.withCredentials ? "include" : "same-origin",
         body: JSON.stringify({
-          [usernameField]: username,
-          [passwordField]: password
+          login: login,
+          password: password,
+          deviceId: deviceId
         })
       });
 
@@ -361,22 +416,15 @@
         throw new Error(getErrorMessage(payload, "Login failed. Check your credentials and try again."));
       }
 
-      if (authConfig.mode !== "cookie") {
-        const token =
-          getValueByPath(payload, authConfig.tokenResponseField || "token") ||
-          payload?.token ||
-          payload?.accessToken ||
-          payload?.jwt;
+      const token =
+        getValueByPath(payload, authConfig.tokenResponseField || "accessToken") ||
+        payload?.accessToken;
 
-        if (!token) {
-          throw new Error("Login succeeded but no auth token was returned.");
-        }
-
-        setToken(token);
-      } else {
-        setCookieSession();
+      if (!token) {
+        throw new Error("Login succeeded but no access token was returned.");
       }
 
+      setToken(token);
       setHash(routes.dashboard);
     } catch (error) {
       renderLogin({ type: "error", message: error.message || "Login failed." });
@@ -389,7 +437,8 @@
     event.preventDefault();
     const form = event.currentTarget;
     const submitButton = form.querySelector('button[type="submit"]');
-    const title = form.clipTitle.value.trim();
+    const iosUserId = form.singleIosUserId.value.trim();
+    const name = form.clipName.value.trim();
     const file = form.singleClipFile.files[0];
 
     if (!file) {
@@ -400,26 +449,8 @@
     submitButton.disabled = true;
     renderSingleUpload({ type: "info", message: "Uploading clip..." });
 
-    const formData = new window.FormData();
-    formData.append(uploadConfig.titleField || "title", title);
-    formData.append(uploadConfig.singleFileField || "file", file);
-
     try {
-      const response = await window.fetch(getApiUrl(uploadConfig.singlePath || "/api/admin/clips"), {
-        method: "POST",
-        headers: getAuthHeaders(),
-        credentials: uploadConfig.withCredentials ? "include" : "same-origin",
-        body: formData
-      });
-
-      const payload = await parseJson(response);
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          clearAuth();
-        }
-        throw new Error(getErrorMessage(payload, "Single clip upload failed."));
-      }
+      const payload = await uploadSingleClip(iosUserId, name, file);
 
       form.reset();
       renderSingleUpload({
@@ -436,52 +467,10 @@
     }
   }
 
-  function uploadWithProgress(url, formData, onProgress) {
-    return new Promise(function (resolve, reject) {
-      const request = new window.XMLHttpRequest();
-      request.open("POST", url);
-
-      Object.entries(getAuthHeaders()).forEach(function (entry) {
-        request.setRequestHeader(entry[0], entry[1]);
-      });
-
-      request.withCredentials = Boolean(uploadConfig.withCredentials);
-
-      request.upload.addEventListener("progress", function (event) {
-        if (!event.lengthComputable) {
-          return;
-        }
-
-        const percent = Math.round((event.loaded / event.total) * 100);
-        onProgress(percent);
-      });
-
-      request.addEventListener("load", function () {
-        const payload = request.responseText ? parseJsonSafe(request.responseText) : null;
-
-        if (request.status >= 200 && request.status < 300) {
-          resolve(payload);
-          return;
-        }
-
-        if (request.status === 401) {
-          clearAuth();
-        }
-
-        reject(new Error(getErrorMessage(payload, "Batch upload failed.")));
-      });
-
-      request.addEventListener("error", function () {
-        reject(new Error("Network error while uploading files."));
-      });
-
-      request.send(formData);
-    });
-  }
-
   async function handleMultiUploadSubmit(event) {
     event.preventDefault();
     const form = event.currentTarget;
+    const iosUserId = form.multiIosUserId.value.trim();
     const files = Array.from(form.multiClipFiles.files || []);
 
     if (!files.length) {
@@ -489,48 +478,65 @@
         progress: 0,
         fileCount: 0,
         status: { type: "error", message: "Select one or more files before submitting." },
+        results: [],
         isSubmitting: false
       });
       return;
     }
 
+    const results = [];
     updateMultiUploadState({
       progress: 0,
       fileCount: files.length,
       status: { type: "info", message: "Uploading files..." },
+      results: results,
       isSubmitting: true
     });
 
-    const formData = new window.FormData();
-    files.forEach(function (file) {
-      formData.append(uploadConfig.multiFileField || "files", file);
-    });
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const name = getDefaultClipName(file);
 
-    try {
-      const payload = await uploadWithProgress(getApiUrl(uploadConfig.multiPath || "/api/admin/clips/bulk"), formData, function (progress) {
-        updateMultiUploadState({
-          progress: progress,
-          fileCount: files.length,
-          status: { type: "info", message: "Uploading files..." },
-          isSubmitting: true
+      try {
+        await uploadSingleClip(iosUserId, name, file);
+        results.push({
+          success: true,
+          name: name,
+          message: "Upload complete."
         });
-      });
+      } catch (error) {
+        results.push({
+          success: false,
+          name: name,
+          message: error.message || "Upload failed."
+        });
+      }
 
-      form.reset();
       updateMultiUploadState({
-        progress: 100,
-        fileCount: 0,
-        status: { type: "success", message: payload?.message || "Files uploaded successfully." },
-        isSubmitting: false
-      });
-    } catch (error) {
-      updateMultiUploadState({
-        progress: 0,
+        progress: Math.round(((index + 1) / files.length) * 100),
         fileCount: files.length,
-        status: { type: "error", message: error.message || "Batch upload failed." },
-        isSubmitting: false
+        status: { type: "info", message: `Processed ${index + 1} of ${files.length} files.` },
+        results: results,
+        isSubmitting: true
       });
     }
+
+    const successCount = results.filter(function (result) {
+      return result.success;
+    }).length;
+    const failureCount = results.length - successCount;
+
+    form.reset();
+    updateMultiUploadState({
+      progress: 100,
+      fileCount: 0,
+      status: {
+        type: failureCount ? "error" : "success",
+        message: `Completed ${successCount}/${results.length} uploads. Failed: ${failureCount}.`
+      },
+      results: results,
+      isSubmitting: false
+    });
   }
 
   function render() {
@@ -549,7 +555,7 @@
         renderSingleUpload();
         break;
       case routes.multi:
-        renderMultiUpload({ progress: 0, fileCount: 0 });
+        renderMultiUpload({ progress: 0, fileCount: 0, results: [] });
         break;
       case routes.login:
       default:

@@ -1,22 +1,22 @@
 window.APP_CONFIG = {
   apiBaseUrl: "https://api.rhapsidious.com",
   auth: {
-    loginPath: "/api/admin/auth/login",
+    loginPath: "/auth/login",
+    mePath: "/auth/me",
     mode: "bearer",
-    usernameField: "username",
-    passwordField: "password",
-    tokenResponseField: "token",
+    tokenResponseField: "accessToken",
     tokenStorageKey: "rhapsidious_upload_admin_token",
+    deviceIdStorageKey: "rhapsidious_upload_admin_device_id",
     authHeaderName: "Authorization",
     authScheme: "Bearer",
     withCredentials: false
   },
   uploads: {
-    singlePath: "/api/admin/clips",
-    multiPath: "/api/admin/clips/bulk",
-    titleField: "title",
+    singlePath: "/iosclips",
+    importPath: "/iosclips/import",
+    iosUserIdField: "iosUserId",
+    titleField: "name",
     singleFileField: "file",
-    multiFileField: "files",
     withCredentials: false
   }
 };

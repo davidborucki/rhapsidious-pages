@@ -6,6 +6,8 @@
   const uploadConfig = config.uploads || {};
   const tokenStorageKey = authConfig.tokenStorageKey || "upload_admin_token";
   const deviceIdStorageKey = authConfig.deviceIdStorageKey || "upload_admin_device_id";
+  let authenticatedUserId = null;
+  let authenticatedUserError = "";
 
   const routes = {
     login: "#/login",
@@ -32,8 +34,14 @@
     }
   }
 
+  function clearAuthenticatedUser() {
+    authenticatedUserId = null;
+    authenticatedUserError = "";
+  }
+
   function clearAuth() {
     window.localStorage.removeItem(tokenStorageKey);
+    clearAuthenticatedUser();
   }
 
   function isAuthenticated() {
@@ -102,6 +110,27 @@
     return fallback;
   }
 
+  function getAuthenticatedUserId() {
+    return authenticatedUserId;
+  }
+
+  function getAuthenticatedUserMessage() {
+    return authenticatedUserError || "Your authenticated user ID is unavailable. Sign in again.";
+  }
+
+  function readAuthenticatedUserId(payload) {
+    const configuredId = getValueByPath(payload, authConfig.userIdResponseField || "id");
+    if (configuredId != null && configuredId !== "") {
+      return configuredId;
+    }
+
+    if (payload && payload.id != null && payload.id !== "") {
+      return payload.id;
+    }
+
+    return null;
+  }
+
   function getAuthHeaders() {
     const token = getToken();
     if (!token) {
@@ -113,6 +142,34 @@
     return {
       [authHeaderName]: authScheme ? `${authScheme} ${token}` : token
     };
+  }
+
+  async function loadAuthenticatedUser() {
+    authenticatedUserError = "";
+    const response = await window.fetch(getApiUrl(authConfig.mePath || "/auth/me"), {
+      method: "GET",
+      headers: getAuthHeaders(),
+      credentials: authConfig.withCredentials ? "include" : "same-origin"
+    });
+
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        clearAuth();
+      }
+
+      throw new Error(getErrorMessage(payload, "Failed to load the authenticated user."));
+    }
+
+    const userId = readAuthenticatedUserId(payload);
+    if (userId == null || userId === "") {
+      throw new Error("Authenticated user loaded, but no user id was returned.");
+    }
+
+    authenticatedUserId = userId;
+    authenticatedUserError = "";
+    return payload;
   }
 
   function renderStatus(status) {
@@ -257,19 +314,17 @@
 
   function renderSingleUpload(status) {
     logoutButton.classList.remove("hidden");
+    const canSubmit = getAuthenticatedUserId() != null && getAuthenticatedUserId() !== "";
+    const resolvedStatus = canSubmit ? status : { type: "error", message: getAuthenticatedUserMessage() };
     app.innerHTML = `
       <section class="panel form-panel">
         <div class="stack">
           <div class="stack">
             <h2>Upload Single Clip</h2>
-            <p>Send one clip with its iOS user ID, name, and file.</p>
+            <p>Send one clip with its authenticated account, name, and file.</p>
           </div>
-          ${renderStatus(status)}
+          ${renderStatus(resolvedStatus)}
           <form id="singleUploadForm" class="stack">
-            <div class="field">
-              <label for="singleIosUserId">iOS User ID</label>
-              <input id="singleIosUserId" name="singleIosUserId" type="text" required />
-            </div>
             <div class="field">
               <label for="clipName">Name</label>
               <input id="clipName" name="clipName" type="text" required />
@@ -279,7 +334,7 @@
               <input id="singleClipFile" name="singleClipFile" type="file" required />
             </div>
             <div class="actions">
-              <button class="primary-button" type="submit">Submit</button>
+              <button class="primary-button" type="submit" ${canSubmit ? "" : "disabled"}>Submit</button>
               <button id="backToDashboardSingle" class="secondary-button" type="button">Back</button>
             </div>
           </form>
@@ -298,6 +353,8 @@
     const progress = state && typeof state.progress === "number" ? state.progress : 0;
     const fileCount = state && typeof state.fileCount === "number" ? state.fileCount : 0;
     const results = (state && state.results) || [];
+    const canSubmit = getAuthenticatedUserId() != null && getAuthenticatedUserId() !== "";
+    const resolvedStatus = canSubmit ? status : { type: "error", message: getAuthenticatedUserMessage() };
 
     logoutButton.classList.remove("hidden");
     app.innerHTML = `
@@ -305,14 +362,10 @@
         <div class="stack">
           <div class="stack">
             <h2>Upload Multiple Clips</h2>
-            <p>Uploads are sent sequentially to the existing single upload endpoint.</p>
+            <p>Uploads are sent sequentially using the authenticated account.</p>
           </div>
-          <div id="multiUploadStatus">${renderStatus(status)}</div>
+          <div id="multiUploadStatus">${renderStatus(resolvedStatus)}</div>
           <form id="multiUploadForm" class="stack">
-            <div class="field">
-              <label for="multiIosUserId">iOS User ID</label>
-              <input id="multiIosUserId" name="multiIosUserId" type="text" required />
-            </div>
             <div class="field">
               <label for="multiClipFiles">Clip Files</label>
               <input id="multiClipFiles" name="multiClipFiles" type="file" multiple required />
@@ -328,7 +381,7 @@
             </div>
             <div id="multiUploadResults">${renderMultiResults(results)}</div>
             <div class="actions">
-              <button id="multiUploadSubmitButton" class="primary-button" type="submit">Submit</button>
+              <button id="multiUploadSubmitButton" class="primary-button" type="submit" ${canSubmit ? "" : "disabled"}>Submit</button>
               <button id="backToDashboardMulti" class="secondary-button" type="button">Back</button>
             </div>
           </form>
@@ -425,8 +478,11 @@
       }
 
       setToken(token);
+      await loadAuthenticatedUser();
       setHash(routes.dashboard);
     } catch (error) {
+      clearAuth();
+      authenticatedUserError = error.message || "Login failed.";
       renderLogin({ type: "error", message: error.message || "Login failed." });
     } finally {
       submitButton.disabled = false;
@@ -437,9 +493,14 @@
     event.preventDefault();
     const form = event.currentTarget;
     const submitButton = form.querySelector('button[type="submit"]');
-    const iosUserId = form.singleIosUserId.value.trim();
+    const iosUserId = getAuthenticatedUserId();
     const name = form.clipName.value.trim();
     const file = form.singleClipFile.files[0];
+
+    if (iosUserId == null || iosUserId === "") {
+      renderSingleUpload({ type: "error", message: getAuthenticatedUserMessage() });
+      return;
+    }
 
     if (!file) {
       renderSingleUpload({ type: "error", message: "Select a file before submitting." });
@@ -470,8 +531,19 @@
   async function handleMultiUploadSubmit(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    const iosUserId = form.multiIosUserId.value.trim();
+    const iosUserId = getAuthenticatedUserId();
     const files = Array.from(form.multiClipFiles.files || []);
+
+    if (iosUserId == null || iosUserId === "") {
+      updateMultiUploadState({
+        progress: 0,
+        fileCount: files.length,
+        status: { type: "error", message: getAuthenticatedUserMessage() },
+        results: [],
+        isSubmitting: false
+      });
+      return;
+    }
 
     if (!files.length) {
       updateMultiUploadState({
@@ -570,5 +642,19 @@
   });
 
   window.addEventListener("hashchange", render);
-  render();
+
+  (async function initialize() {
+    if (isAuthenticated()) {
+      try {
+        await loadAuthenticatedUser();
+      } catch (error) {
+        clearAuth();
+        authenticatedUserError = error.message || "Failed to load the authenticated user.";
+        renderLogin({ type: "error", message: authenticatedUserError });
+        return;
+      }
+    }
+
+    render();
+  })();
 })();

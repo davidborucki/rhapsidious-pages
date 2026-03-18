@@ -1,5 +1,5 @@
 window.APP_CONFIG = {
-  apiBaseUrl: "https://api.rhapsidious.com",
+  apiBaseUrl: "https://dev-backend-withered-thunder-4589.fly.dev",
   auth: {
     loginPath: "/auth/login",
     mePath: "/auth/me",

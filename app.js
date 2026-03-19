@@ -417,6 +417,7 @@
     appendFormValue(formData, uploadConfig.guestCsvField || "guestCsv", uploadDetails && uploadDetails.guestCsv);
     appendFormValue(formData, uploadConfig.hostField || "host", uploadDetails && uploadDetails.host);
     formData.append(uploadConfig.singleFileField || "file", file);
+    console.log([...formData.entries()]);
     return formData;
   }
 

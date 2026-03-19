@@ -3,12 +3,15 @@
   const logoutButton = document.getElementById("logoutButton");
   const config = window.APP_CONFIG || {};
   const authConfig = config.auth || {};
+  const processingConfig = config.processing || {};
   const uploadConfig = config.uploads || {};
   const tokenStorageKey = authConfig.tokenStorageKey || "upload_admin_token";
   const deviceIdStorageKey = authConfig.deviceIdStorageKey || "upload_admin_device_id";
+  const processingPollIntervalMs = Math.min(2000, Math.max(1000, Number(processingConfig.pollIntervalMs) || 1500));
   let authenticatedUser = null;
   let authenticatedUserId = null;
   let authenticatedUserError = "";
+  let activeProcessingPollRun = 0;
 
   const routes = {
     login: "#/login",
@@ -44,6 +47,10 @@
   function clearAuth() {
     window.localStorage.removeItem(tokenStorageKey);
     clearAuthenticatedUser();
+  }
+
+  function cancelProcessingPolling() {
+    activeProcessingPollRun += 1;
   }
 
   function isAuthenticated() {
@@ -110,6 +117,17 @@
     }
 
     return fallback;
+  }
+
+  function getFirstValueByPaths(source, paths) {
+    for (let index = 0; index < paths.length; index += 1) {
+      const value = getValueByPath(source, paths[index]);
+      if (value != null && value !== "") {
+        return value;
+      }
+    }
+
+    return null;
   }
 
   function getAuthenticatedUserId() {
@@ -252,6 +270,124 @@
 
   function appendFormValue(formData, fieldName, value) {
     formData.append(fieldName, value == null ? "" : String(value));
+  }
+
+  function readUploadedClipId(payload) {
+    return getFirstValueByPaths(payload, [
+      processingConfig.clipIdResponseField || uploadConfig.clipIdResponseField || "clipId",
+      "id",
+      "clip.id",
+      "data.clipId",
+      "data.id"
+    ]);
+  }
+
+  function readProcessingStatus(payload) {
+    return getFirstValueByPaths(payload, [
+      processingConfig.statusResponseField || "status",
+      "processingStatus",
+      "state",
+      "data.status"
+    ]);
+  }
+
+  function getProcessingStatusDetails(rawStatus) {
+    const normalizedStatus = String(rawStatus || "")
+      .trim()
+      .replace(/[\s-]+/g, "_")
+      .toUpperCase();
+
+    switch (normalizedStatus) {
+      case "UPLOADING":
+      case "UPLOADED":
+      case "PENDING":
+      case "QUEUED":
+        return { type: "info", message: "Uploading clip...", done: false, failed: false };
+      case "TRANSCRIBING":
+      case "TRANSCRIPTION":
+        return { type: "info", message: "Transcribing...", done: false, failed: false };
+      case "GENERATING_METADATA":
+      case "METADATA":
+      case "ENRICHING":
+        return { type: "info", message: "Generating metadata...", done: false, failed: false };
+      case "FINALIZING":
+      case "SAVING":
+      case "COMPLETING":
+        return { type: "info", message: "Finalizing...", done: false, failed: false };
+      case "COMPLETED":
+      case "DONE":
+      case "SUCCESS":
+        return { type: "success", message: "Completed", done: true, failed: false };
+      case "FAILED":
+      case "ERROR":
+        return { type: "error", message: "Processing failed.", done: false, failed: true };
+      default:
+        return { type: "info", message: "Generating metadata...", done: false, failed: false };
+    }
+  }
+
+  function wait(ms) {
+    return new Promise(function (resolve) {
+      window.setTimeout(resolve, ms);
+    });
+  }
+
+  async function fetchProcessingStatus(clipId) {
+    const statusUrl = new URL(getApiUrl(processingConfig.statusPath || "/processing/status"), window.location.origin);
+    statusUrl.searchParams.set(processingConfig.clipIdQueryParam || "clipId", clipId);
+
+    const response = await window.fetch(statusUrl.toString(), {
+      method: "GET",
+      headers: getAuthHeaders(),
+      credentials:
+        processingConfig.withCredentials || authConfig.withCredentials || uploadConfig.withCredentials
+          ? "include"
+          : "same-origin"
+    });
+
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        clearAuth();
+      }
+
+      throw new Error(getErrorMessage(payload, "Failed to load processing status."));
+    }
+
+    return payload;
+  }
+
+  async function pollProcessingStatus(clipId, options) {
+    const isActive = options && options.isActive;
+    const onUpdate = options && options.onUpdate;
+
+    while (!isActive || isActive()) {
+      const payload = await fetchProcessingStatus(clipId);
+
+      if (isActive && !isActive()) {
+        return null;
+      }
+
+      const rawStatus = readProcessingStatus(payload);
+      const statusDetails = getProcessingStatusDetails(rawStatus);
+
+      if (onUpdate) {
+        onUpdate(statusDetails, payload);
+      }
+
+      if (statusDetails.failed) {
+        throw new Error(getErrorMessage(payload, "Processing failed."));
+      }
+
+      if (statusDetails.done) {
+        return payload;
+      }
+
+      await wait(processingPollIntervalMs);
+    }
+
+    return null;
   }
 
   function buildMetadataFromForm(form, prefix) {
@@ -457,10 +593,12 @@
     });
   }
 
-  function renderSingleUpload(status) {
+  function renderSingleUpload(status, options) {
     logoutButton.classList.remove("hidden");
+    const viewOptions = options || {};
     const canSubmit = getAuthenticatedUserId() != null && getAuthenticatedUserId() !== "";
     const resolvedStatus = canSubmit ? status : { type: "error", message: getAuthenticatedUserMessage() };
+    const submitDisabled = !canSubmit || Boolean(viewOptions.disableSubmit);
     app.innerHTML = `
       <section class="panel form-panel">
         <div class="stack">
@@ -480,7 +618,7 @@
             </div>
             ${renderMetadataFields("single")}
             <div class="actions">
-              <button class="primary-button" type="submit" ${canSubmit ? "" : "disabled"}>Submit</button>
+              <button class="primary-button" type="submit" ${submitDisabled ? "disabled" : ""}>Submit</button>
               <button id="backToDashboardSingle" class="secondary-button" type="button">Back</button>
             </div>
           </form>
@@ -645,6 +783,7 @@
     const iosUserId = getAuthenticatedUserId();
     const name = form.clipName.value.trim();
     const file = form.singleClipFile.files[0];
+    const pollRunId = activeProcessingPollRun + 1;
     let metadata;
 
     if (iosUserId == null || iosUserId === "") {
@@ -665,17 +804,50 @@
     }
 
     submitButton.disabled = true;
-    renderSingleUpload({ type: "info", message: "Uploading clip..." });
+    activeProcessingPollRun = pollRunId;
+    renderSingleUpload({ type: "info", message: "Uploading clip..." }, { disableSubmit: true });
 
     try {
       const payload = await uploadSingleClip(iosUserId, name, file, metadata);
+      const clipId = readUploadedClipId(payload);
+
+      if (clipId == null || clipId === "") {
+        throw new Error("Clip uploaded, but no clip id was returned for processing status.");
+      }
+
+      await pollProcessingStatus(clipId, {
+        isActive: function () {
+          return pollRunId === activeProcessingPollRun && (window.location.hash || routes.single) === routes.single;
+        },
+        onUpdate: function (statusDetails) {
+          if (pollRunId !== activeProcessingPollRun) {
+            return;
+          }
+
+          renderSingleUpload(
+            {
+              type: statusDetails.type,
+              message: statusDetails.message
+            },
+            { disableSubmit: !statusDetails.done && !statusDetails.failed }
+          );
+        }
+      });
+
+      if (pollRunId !== activeProcessingPollRun) {
+        return;
+      }
 
       form.reset();
       renderSingleUpload({
         type: "success",
-        message: payload?.message || "Clip uploaded successfully."
+        message: "Completed"
       });
     } catch (error) {
+      if (pollRunId !== activeProcessingPollRun) {
+        return;
+      }
+
       renderSingleUpload({
         type: "error",
         message: error.message || "Single clip upload failed."
@@ -785,6 +957,10 @@
   function render() {
     const hash = window.location.hash || (isAuthenticated() ? routes.dashboard : routes.login);
 
+    if (hash !== routes.single) {
+      cancelProcessingPolling();
+    }
+
     if (!isAuthenticated() && hash !== routes.login) {
       setHash(routes.login);
       return;
@@ -808,6 +984,7 @@
   }
 
   logoutButton.addEventListener("click", function () {
+    cancelProcessingPolling();
     clearAuth();
     setHash(routes.login);
   });

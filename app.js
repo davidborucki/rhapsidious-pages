@@ -390,7 +390,7 @@
     return null;
   }
 
-  function buildMetadataFromForm(form, prefix) {
+  function buildUploadDetailsFromForm(form, prefix) {
     const useManualHost = form[`${prefix}ManualHostToggle`].checked;
     const manualHost = form[`${prefix}ManualHost`].value.trim();
     const authenticatedUsername = getAuthenticatedUsername();
@@ -405,30 +405,22 @@
     }
 
     return {
-      genre: form[`${prefix}Genre`].value.trim(),
       guestCsv: normalizeCsv(form[`${prefix}Guests`].value),
-      host: host,
-      subtopicCsv: normalizeCsv(form[`${prefix}Subtopics`].value),
-      toneCsv: normalizeCsv(form[`${prefix}Tone`].value),
-      wpm: form[`${prefix}Wpm`].value.trim()
+      host: host
     };
   }
 
-  function buildClipFormData(iosUserId, name, file, metadata) {
+  function buildClipFormData(iosUserId, name, file, uploadDetails) {
     const formData = new window.FormData();
     appendFormValue(formData, uploadConfig.iosUserIdField || "iosUserId", iosUserId);
     appendFormValue(formData, uploadConfig.titleField || "name", name);
-    appendFormValue(formData, uploadConfig.genreField || "genre", metadata && metadata.genre);
-    appendFormValue(formData, uploadConfig.guestCsvField || "guestCsv", metadata && metadata.guestCsv);
-    appendFormValue(formData, uploadConfig.hostField || "host", metadata && metadata.host);
-    appendFormValue(formData, uploadConfig.subtopicCsvField || "subtopicCsv", metadata && metadata.subtopicCsv);
-    appendFormValue(formData, uploadConfig.toneCsvField || "toneCsv", metadata && metadata.toneCsv);
-    appendFormValue(formData, uploadConfig.wpmField || "wpm", metadata && metadata.wpm);
+    appendFormValue(formData, uploadConfig.guestCsvField || "guestCsv", uploadDetails && uploadDetails.guestCsv);
+    appendFormValue(formData, uploadConfig.hostField || "host", uploadDetails && uploadDetails.host);
     formData.append(uploadConfig.singleFileField || "file", file);
     return formData;
   }
 
-  function renderMetadataFields(prefix) {
+  function renderHostGuestFields(prefix) {
     const authenticatedUsername = getAuthenticatedUsername();
     const hostHint = authenticatedUsername
       ? `Host will use your username: ${authenticatedUsername}.`
@@ -436,24 +428,8 @@
 
     return `
       <div class="field">
-        <label for="${prefix}Genre">Genre</label>
-        <input id="${prefix}Genre" name="${prefix}Genre" type="text" />
-      </div>
-      <div class="field">
         <label for="${prefix}Guests">Guests</label>
         <input id="${prefix}Guests" name="${prefix}Guests" type="text" placeholder="guest-one,guest-two" />
-      </div>
-      <div class="field">
-        <label for="${prefix}Subtopics">Subtopics</label>
-        <input id="${prefix}Subtopics" name="${prefix}Subtopics" type="text" placeholder="topic-one,topic-two" />
-      </div>
-      <div class="field">
-        <label for="${prefix}Tone">Tone</label>
-        <input id="${prefix}Tone" name="${prefix}Tone" type="text" placeholder="warm,playful" />
-      </div>
-      <div class="field">
-        <label for="${prefix}Wpm">WPM</label>
-        <input id="${prefix}Wpm" name="${prefix}Wpm" type="number" min="0" step="1" inputmode="numeric" />
       </div>
       <div class="field">
         <label>
@@ -508,12 +484,12 @@
     });
   }
 
-  async function uploadSingleClip(iosUserId, name, file, metadata) {
+  async function uploadSingleClip(iosUserId, name, file, uploadDetails) {
     const response = await window.fetch(getApiUrl(uploadConfig.singlePath || "/iosclips"), {
       method: "POST",
       headers: getAuthHeaders(),
       credentials: uploadConfig.withCredentials ? "include" : "same-origin",
-      body: buildClipFormData(iosUserId, name, file, metadata)
+      body: buildClipFormData(iosUserId, name, file, uploadDetails)
     });
 
     const payload = await parseJson(response);
@@ -604,7 +580,7 @@
         <div class="stack">
           <div class="stack">
             <h2>Upload Single Clip</h2>
-            <p>Send one clip with its authenticated account, file, and recommendation metadata.</p>
+            <p>Send one clip with its authenticated account, file, host, and guests.</p>
           </div>
           ${renderStatus(resolvedStatus)}
           <form id="singleUploadForm" class="stack">
@@ -616,7 +592,7 @@
               <label for="singleClipFile">Clip File</label>
               <input id="singleClipFile" name="singleClipFile" type="file" required />
             </div>
-            ${renderMetadataFields("single")}
+            ${renderHostGuestFields("single")}
             <div class="actions">
               <button class="primary-button" type="submit" ${submitDisabled ? "disabled" : ""}>Submit</button>
               <button id="backToDashboardSingle" class="secondary-button" type="button">Back</button>
@@ -647,7 +623,7 @@
         <div class="stack">
           <div class="stack">
             <h2>Upload Multiple Clips</h2>
-            <p>Uploads are sent sequentially with one shared metadata set for every selected file.</p>
+            <p>Uploads are sent sequentially with one shared host and guest set for every selected file.</p>
           </div>
           <div id="multiUploadStatus">${renderStatus(resolvedStatus)}</div>
           <form id="multiUploadForm" class="stack">
@@ -655,7 +631,7 @@
               <label for="multiClipFiles">Clip Files</label>
               <input id="multiClipFiles" name="multiClipFiles" type="file" multiple required />
             </div>
-            ${renderMetadataFields("multi")}
+            ${renderHostGuestFields("multi")}
             <div class="progress-wrap">
               <div class="meta-row">
                 <span id="multiFileCount">${fileCount} file${fileCount === 1 ? "" : "s"} selected</span>
@@ -784,7 +760,7 @@
     const name = form.clipName.value.trim();
     const file = form.singleClipFile.files[0];
     const pollRunId = activeProcessingPollRun + 1;
-    let metadata;
+    let uploadDetails;
 
     if (iosUserId == null || iosUserId === "") {
       renderSingleUpload({ type: "error", message: getAuthenticatedUserMessage() });
@@ -797,9 +773,9 @@
     }
 
     try {
-      metadata = buildMetadataFromForm(form, "single");
+      uploadDetails = buildUploadDetailsFromForm(form, "single");
     } catch (error) {
-      renderSingleUpload({ type: "error", message: error.message || "Clip metadata is incomplete." });
+      renderSingleUpload({ type: "error", message: error.message || "Clip details are incomplete." });
       return;
     }
 
@@ -808,7 +784,7 @@
     renderSingleUpload({ type: "info", message: "Uploading clip..." }, { disableSubmit: true });
 
     try {
-      const payload = await uploadSingleClip(iosUserId, name, file, metadata);
+      const payload = await uploadSingleClip(iosUserId, name, file, uploadDetails);
       const clipId = readUploadedClipId(payload);
 
       if (clipId == null || clipId === "") {
@@ -862,7 +838,7 @@
     const form = event.currentTarget;
     const iosUserId = getAuthenticatedUserId();
     const files = Array.from(form.multiClipFiles.files || []);
-    let metadata;
+    let uploadDetails;
 
     if (iosUserId == null || iosUserId === "") {
       updateMultiUploadState({
@@ -887,12 +863,12 @@
     }
 
     try {
-      metadata = buildMetadataFromForm(form, "multi");
+      uploadDetails = buildUploadDetailsFromForm(form, "multi");
     } catch (error) {
       updateMultiUploadState({
         progress: 0,
         fileCount: files.length,
-        status: { type: "error", message: error.message || "Clip metadata is incomplete." },
+        status: { type: "error", message: error.message || "Clip details are incomplete." },
         results: [],
         isSubmitting: false
       });
@@ -913,7 +889,7 @@
       const name = getDefaultClipName(file);
 
       try {
-        await uploadSingleClip(iosUserId, name, file, metadata);
+        await uploadSingleClip(iosUserId, name, file, uploadDetails);
         results.push({
           success: true,
           name: name,

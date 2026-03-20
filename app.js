@@ -12,6 +12,11 @@
   let authenticatedUserId = null;
   let authenticatedUserError = "";
   let activeProcessingPollRun = 0;
+  let activeMultiUploadRun = 0;
+  let multiUploadState = {
+    cards: [],
+    isSubmitting: false
+  };
 
   const routes = {
     login: "#/login",
@@ -51,6 +56,11 @@
 
   function cancelProcessingPolling() {
     activeProcessingPollRun += 1;
+  }
+
+  function cancelMultiUploadRun() {
+    activeMultiUploadRun += 1;
+    multiUploadState.isSubmitting = false;
   }
 
   function isAuthenticated() {
@@ -219,30 +229,6 @@
     return `<div class="status status-${escapeHtml(status.type || "info")}">${escapeHtml(status.message)}</div>`;
   }
 
-  function renderMultiResults(results) {
-    if (!results || !results.length) {
-      return "";
-    }
-
-    return `
-      <div class="stack">
-        ${results
-          .map(function (result) {
-            const outcomeClass = result.success ? "success" : "error";
-            const outcomeLabel = result.success ? "Uploaded" : "Failed";
-            const detail = result.message ? `: ${escapeHtml(result.message)}` : "";
-
-            return `
-              <div class="status status-${outcomeClass}">
-                <strong>${outcomeLabel}</strong> ${escapeHtml(result.name)}${detail}
-              </div>
-            `;
-          })
-          .join("")}
-      </div>
-    `;
-  }
-
   function getOrCreateDeviceId() {
     const existing = window.localStorage.getItem(deviceIdStorageKey);
     if (existing) {
@@ -390,9 +376,9 @@
     return null;
   }
 
-  function buildUploadDetailsFromForm(form, prefix) {
-    const useManualHost = form[`${prefix}ManualHostToggle`].checked;
-    const manualHost = form[`${prefix}ManualHost`].value.trim();
+  function buildUploadDetailsFromValues(values) {
+    const useManualHost = Boolean(values && values.useManualHost);
+    const manualHost = String((values && values.manualHost) || "").trim();
     const authenticatedUsername = getAuthenticatedUsername();
     const host = useManualHost ? manualHost : authenticatedUsername;
 
@@ -405,9 +391,17 @@
     }
 
     return {
-      guestCsv: normalizeCsv(form[`${prefix}Guests`].value),
+      guestCsv: normalizeCsv(values && values.guestCsv),
       host: host
     };
+  }
+
+  function buildUploadDetailsFromForm(form, prefix) {
+    return buildUploadDetailsFromValues({
+      guestCsv: form[`${prefix}Guests`].value,
+      useManualHost: form[`${prefix}ManualHostToggle`].checked,
+      manualHost: form[`${prefix}ManualHost`].value
+    });
   }
 
   function buildClipFormData(iosUserId, name, file, uploadDetails) {
@@ -421,7 +415,13 @@
     return formData;
   }
 
-  function renderHostGuestFields(prefix) {
+  function renderHostGuestFields(prefix, values, options) {
+    const fieldValues = values || {};
+    const fieldOptions = options || {};
+    const useManualHost = Boolean(fieldValues.useManualHost);
+    const guestCsv = fieldValues.guestCsv || "";
+    const manualHost = fieldValues.manualHost || "";
+    const disableInputs = Boolean(fieldOptions.disableInputs);
     const authenticatedUsername = getAuthenticatedUsername();
     const hostHint = authenticatedUsername
       ? `Host will use your username: ${authenticatedUsername}.`
@@ -430,18 +430,18 @@
     return `
       <div class="field">
         <label for="${prefix}Guests">Guests</label>
-        <input id="${prefix}Guests" name="${prefix}Guests" type="text" placeholder="guest-one,guest-two" />
+        <input id="${prefix}Guests" name="${prefix}Guests" type="text" placeholder="guest-one,guest-two" value="${escapeHtml(guestCsv)}" ${disableInputs ? "disabled" : ""} />
       </div>
       <div class="field">
         <label>
-          <input id="${prefix}ManualHostToggle" name="${prefix}ManualHostToggle" type="checkbox" />
+          <input id="${prefix}ManualHostToggle" name="${prefix}ManualHostToggle" type="checkbox" ${useManualHost ? "checked" : ""} ${disableInputs ? "disabled" : ""} />
           Check this box if I am not the host
         </label>
       </div>
-      <p id="${prefix}AutoHostHint">${escapeHtml(hostHint)}</p>
-      <div id="${prefix}ManualHostWrap" class="field" hidden>
+      <p id="${prefix}AutoHostHint" ${useManualHost ? "hidden" : ""}>${escapeHtml(hostHint)}</p>
+      <div id="${prefix}ManualHostWrap" class="field" ${useManualHost ? "" : "hidden"}>
         <label for="${prefix}ManualHost">Host</label>
-        <input id="${prefix}ManualHost" name="${prefix}ManualHost" type="text" disabled />
+        <input id="${prefix}ManualHost" name="${prefix}ManualHost" type="text" value="${escapeHtml(manualHost)}" ${useManualHost ? "required" : "disabled"} ${disableInputs ? "disabled" : ""} />
       </div>
     `;
   }
@@ -473,7 +473,7 @@
       : "Your authenticated username is unavailable. Check the box and enter the host manually.";
   }
 
-  function bindHostToggle(prefix) {
+  function bindHostToggle(prefix, options) {
     const toggle = document.getElementById(`${prefix}ManualHostToggle`);
     if (!toggle) {
       return;
@@ -482,7 +482,102 @@
     syncHostInput(prefix);
     toggle.addEventListener("change", function () {
       syncHostInput(prefix);
+      if (options && typeof options.onChange === "function") {
+        options.onChange(toggle.checked);
+      }
     });
+  }
+
+  function createMultiUploadCard(file, index) {
+    return {
+      id: `multi-card-${index}`,
+      file: file,
+      name: getDefaultClipName(file),
+      guestCsv: "",
+      useManualHost: false,
+      manualHost: "",
+      status: { type: "info", message: "Ready" }
+    };
+  }
+
+  function getMultiUploadCards() {
+    return multiUploadState.cards || [];
+  }
+
+  function isMultiUploadActive(runId) {
+    return runId === activeMultiUploadRun && (window.location.hash || routes.multi) === routes.multi;
+  }
+
+  function renderMultiUploadCard(card, index, options) {
+    const cardOptions = options || {};
+    const isLastCard = Boolean(cardOptions.isLastCard);
+    const submitDisabled = Boolean(cardOptions.submitDisabled);
+
+    return `
+      <section class="panel form-panel">
+        <div class="stack">
+          <div class="stack">
+            <h2>Upload Clip ${index + 1}</h2>
+            <p>Send this clip with its own name, host, and guest list.</p>
+          </div>
+          ${renderStatus(card.status || { type: "info", message: "Ready" })}
+          <div class="field">
+            <label for="${card.id}Name">Name</label>
+            <input id="${card.id}Name" name="${card.id}Name" type="text" value="${escapeHtml(card.name || "")}" required ${multiUploadState.isSubmitting ? "disabled" : ""} />
+          </div>
+          <div class="field">
+            <label for="${card.id}File">Clip File</label>
+            <input id="${card.id}File" name="${card.id}File" type="text" value="${escapeHtml(card.file.name)}" disabled />
+          </div>
+          ${renderHostGuestFields(card.id, card, { disableInputs: multiUploadState.isSubmitting })}
+          ${isLastCard ? `<div class="actions"><button class="primary-button" type="submit" ${submitDisabled ? "disabled" : ""}>Submit</button></div>` : ""}
+        </div>
+      </section>
+    `;
+  }
+
+  function bindMultiUploadCardInputs() {
+    getMultiUploadCards().forEach(function (card, index) {
+      const nameInput = document.getElementById(`${card.id}Name`);
+      const guestsInput = document.getElementById(`${card.id}Guests`);
+      const manualHostInput = document.getElementById(`${card.id}ManualHost`);
+
+      if (nameInput) {
+        nameInput.addEventListener("input", function (event) {
+          multiUploadState.cards[index].name = event.currentTarget.value;
+        });
+      }
+
+      if (guestsInput) {
+        guestsInput.addEventListener("input", function (event) {
+          multiUploadState.cards[index].guestCsv = event.currentTarget.value;
+        });
+      }
+
+      if (manualHostInput) {
+        manualHostInput.addEventListener("input", function (event) {
+          multiUploadState.cards[index].manualHost = event.currentTarget.value;
+        });
+      }
+
+      bindHostToggle(card.id, {
+        onChange: function (checked) {
+          multiUploadState.cards[index].useManualHost = checked;
+          if (!checked) {
+            multiUploadState.cards[index].manualHost = "";
+          }
+        }
+      });
+    });
+  }
+
+  function handleMultiFilesChange(event) {
+    const files = Array.from(event.target.files || []);
+    cancelMultiUploadRun();
+    multiUploadState.cards = files.map(function (file, index) {
+      return createMultiUploadCard(file, index);
+    });
+    renderMultiUpload();
   }
 
   async function uploadSingleClip(iosUserId, name, file, uploadDetails) {
@@ -552,7 +647,7 @@
         <article class="panel dashboard-card">
           <div class="stack">
             <h2>Upload Multiple Clips</h2>
-            <p>Send files one at a time to the existing upload endpoint.</p>
+            <p>Create one upload card per selected file and send them sequentially.</p>
           </div>
           <div class="actions">
             <button id="goMulti" class="primary-button" type="button">Open</button>
@@ -610,95 +705,53 @@
     });
   }
 
-  function renderMultiUpload(state) {
-    const status = state && state.status;
-    const progress = state && typeof state.progress === "number" ? state.progress : 0;
-    const fileCount = state && typeof state.fileCount === "number" ? state.fileCount : 0;
-    const results = (state && state.results) || [];
+  function renderMultiUpload() {
+    const cards = getMultiUploadCards();
     const canSubmit = getAuthenticatedUserId() != null && getAuthenticatedUserId() !== "";
-    const resolvedStatus = canSubmit ? status : { type: "error", message: getAuthenticatedUserMessage() };
+    const selectionStatus = canSubmit ? null : { type: "error", message: getAuthenticatedUserMessage() };
+    const fileCount = cards.length;
+    const fileSummary = fileCount
+      ? `${fileCount} file${fileCount === 1 ? "" : "s"} selected. Each clip has its own upload card below.`
+      : "Choose one or more clip files to create upload cards.";
 
     logoutButton.classList.remove("hidden");
     app.innerHTML = `
-      <section class="panel form-panel">
-        <div class="stack">
+      <div class="stack">
+        <section class="panel form-panel">
           <div class="stack">
-            <h2>Upload Multiple Clips</h2>
-            <p>Uploads are sent sequentially with one shared host and guest set for every selected file.</p>
-          </div>
-          <div id="multiUploadStatus">${renderStatus(resolvedStatus)}</div>
-          <form id="multiUploadForm" class="stack">
+            <div class="stack">
+              <h2>Upload Multiple Clips</h2>
+              <p>Select multiple files to create one upload card per clip.</p>
+            </div>
+            ${renderStatus(selectionStatus)}
             <div class="field">
               <label for="multiClipFiles">Clip Files</label>
-              <input id="multiClipFiles" name="multiClipFiles" type="file" multiple required />
+              <input id="multiClipFiles" name="multiClipFiles" type="file" multiple ${multiUploadState.isSubmitting ? "disabled" : ""} />
             </div>
-            ${renderHostGuestFields("multi")}
-            <div class="progress-wrap">
-              <div class="meta-row">
-                <span id="multiFileCount">${fileCount} file${fileCount === 1 ? "" : "s"} selected</span>
-                <span id="multiProgressText">${progress}% complete</span>
-              </div>
-              <div class="progress-bar" aria-hidden="true">
-                <div id="multiProgressValue" class="progress-value" style="width: ${progress}%;"></div>
-              </div>
-            </div>
-            <div id="multiUploadResults">${renderMultiResults(results)}</div>
             <div class="actions">
-              <button id="multiUploadSubmitButton" class="primary-button" type="submit" ${canSubmit ? "" : "disabled"}>Submit</button>
               <button id="backToDashboardMulti" class="secondary-button" type="button">Back</button>
             </div>
-          </form>
-        </div>
-      </section>
+            <p>${escapeHtml(fileSummary)}</p>
+          </div>
+        </section>
+        ${cards.length ? `<form id="multiUploadForm" class="stack">${cards
+          .map(function (card, index) {
+            return renderMultiUploadCard(card, index, {
+              isLastCard: index === cards.length - 1,
+              submitDisabled: !canSubmit || multiUploadState.isSubmitting
+            });
+          })
+          .join("")}</form>` : ""}
+      </div>
     `;
 
-    document.getElementById("multiUploadForm").addEventListener("submit", handleMultiUploadSubmit);
-    bindHostToggle("multi");
-    document.getElementById("multiClipFiles").addEventListener("change", function (event) {
-      updateMultiUploadState({
-        progress: 0,
-        fileCount: event.target.files.length,
-        status: status,
-        results: []
-      });
-    });
+    document.getElementById("multiClipFiles").addEventListener("change", handleMultiFilesChange);
     document.getElementById("backToDashboardMulti").addEventListener("click", function () {
       setHash(routes.dashboard);
     });
-  }
-
-  function updateMultiUploadState(state) {
-    const progress = state && typeof state.progress === "number" ? state.progress : 0;
-    const fileCount = state && typeof state.fileCount === "number" ? state.fileCount : 0;
-    const statusHost = document.getElementById("multiUploadStatus");
-    const fileCountNode = document.getElementById("multiFileCount");
-    const progressNode = document.getElementById("multiProgressText");
-    const progressValue = document.getElementById("multiProgressValue");
-    const submitButton = document.getElementById("multiUploadSubmitButton");
-    const resultsHost = document.getElementById("multiUploadResults");
-
-    if (statusHost) {
-      statusHost.innerHTML = renderStatus(state && state.status);
-    }
-
-    if (fileCountNode) {
-      fileCountNode.textContent = `${fileCount} file${fileCount === 1 ? "" : "s"} selected`;
-    }
-
-    if (progressNode) {
-      progressNode.textContent = `${progress}% complete`;
-    }
-
-    if (progressValue) {
-      progressValue.style.width = `${progress}%`;
-    }
-
-    if (resultsHost) {
-      resultsHost.innerHTML = renderMultiResults(state && state.results);
-    }
-
-    if (submitButton && typeof state?.isSubmitting === "boolean") {
-      submitButton.disabled = state.isSubmitting || getAuthenticatedUserId() == null || getAuthenticatedUserId() === "";
+    if (cards.length) {
+      document.getElementById("multiUploadForm").addEventListener("submit", handleMultiUploadSubmit);
+      bindMultiUploadCardInputs();
     }
   }
 
@@ -836,99 +889,108 @@
 
   async function handleMultiUploadSubmit(event) {
     event.preventDefault();
-    const form = event.currentTarget;
     const iosUserId = getAuthenticatedUserId();
-    const files = Array.from(form.multiClipFiles.files || []);
-    let uploadDetails;
+    const cards = getMultiUploadCards();
+    const uploadRunId = activeMultiUploadRun + 1;
 
     if (iosUserId == null || iosUserId === "") {
-      updateMultiUploadState({
-        progress: 0,
-        fileCount: files.length,
-        status: { type: "error", message: getAuthenticatedUserMessage() },
-        results: [],
-        isSubmitting: false
+      multiUploadState.cards = cards.map(function (card) {
+        return {
+          ...card,
+          status: { type: "error", message: getAuthenticatedUserMessage() }
+        };
       });
+      renderMultiUpload();
       return;
     }
 
-    if (!files.length) {
-      updateMultiUploadState({
-        progress: 0,
-        fileCount: 0,
-        status: { type: "error", message: "Select one or more files before submitting." },
-        results: [],
-        isSubmitting: false
-      });
+    if (!cards.length) {
+      renderMultiUpload();
       return;
     }
 
-    try {
-      uploadDetails = buildUploadDetailsFromForm(form, "multi");
-    } catch (error) {
-      updateMultiUploadState({
-        progress: 0,
-        fileCount: files.length,
-        status: { type: "error", message: error.message || "Clip details are incomplete." },
-        results: [],
-        isSubmitting: false
-      });
-      return;
-    }
+    activeMultiUploadRun = uploadRunId;
+    multiUploadState.isSubmitting = true;
+    renderMultiUpload();
 
-    const results = [];
-    updateMultiUploadState({
-      progress: 0,
-      fileCount: files.length,
-      status: { type: "info", message: "Uploading files..." },
-      results: results,
-      isSubmitting: true
-    });
-
-    for (let index = 0; index < files.length; index += 1) {
-      const file = files[index];
-      const name = getDefaultClipName(file);
-
-      try {
-        await uploadSingleClip(iosUserId, name, file, uploadDetails);
-        results.push({
-          success: true,
-          name: name,
-          message: "Upload complete."
-        });
-      } catch (error) {
-        results.push({
-          success: false,
-          name: name,
-          message: error.message || "Upload failed."
-        });
+    for (let index = 0; index < cards.length; index += 1) {
+      if (!isMultiUploadActive(uploadRunId)) {
+        return;
       }
 
-      updateMultiUploadState({
-        progress: Math.round(((index + 1) / files.length) * 100),
-        fileCount: files.length,
-        status: { type: "info", message: `Processed ${index + 1} of ${files.length} files.` },
-        results: results,
-        isSubmitting: true
-      });
+      const card = multiUploadState.cards[index];
+      let uploadDetails;
+
+      if (!card.name.trim()) {
+        multiUploadState.cards[index].status = { type: "error", message: "Failed: Enter a name before submitting." };
+        renderMultiUpload();
+        continue;
+      }
+
+      try {
+        uploadDetails = buildUploadDetailsFromValues(card);
+      } catch (error) {
+        multiUploadState.cards[index].status = {
+          type: "error",
+          message: `Failed: ${error.message || "Clip details are incomplete."}`
+        };
+        renderMultiUpload();
+        continue;
+      }
+
+      multiUploadState.cards[index].status = { type: "info", message: "Uploading..." };
+      renderMultiUpload();
+
+      try {
+        const payload = await uploadSingleClip(iosUserId, card.name.trim(), card.file, uploadDetails);
+        const clipId = readUploadedClipId(payload);
+
+        if (clipId == null || clipId === "") {
+          throw new Error("Clip uploaded, but no clip id was returned for processing status.");
+        }
+
+        await pollProcessingStatus(clipId, {
+          isActive: function () {
+            return isMultiUploadActive(uploadRunId);
+          },
+          onUpdate: function (statusDetails) {
+            if (!isMultiUploadActive(uploadRunId)) {
+              return;
+            }
+
+            multiUploadState.cards[index].status = {
+              type: statusDetails.type,
+              message: statusDetails.message
+            };
+            renderMultiUpload();
+          }
+        });
+
+        if (!isMultiUploadActive(uploadRunId)) {
+          return;
+        }
+
+        multiUploadState.cards[index].status = { type: "success", message: "Completed" };
+      } catch (error) {
+        if (!isMultiUploadActive(uploadRunId)) {
+          return;
+        }
+
+        multiUploadState.cards[index].status = {
+          type: "error",
+          message: `Failed: ${error.message || "Upload failed."}`
+        };
+      }
+
+      renderMultiUpload();
     }
 
-    const successCount = results.filter(function (result) {
-      return result.success;
-    }).length;
-    const failureCount = results.length - successCount;
+    if (!isMultiUploadActive(uploadRunId)) {
+      return;
+    }
 
-    form.reset();
-    updateMultiUploadState({
-      progress: 100,
-      fileCount: 0,
-      status: {
-        type: failureCount ? "error" : "success",
-        message: `Completed ${successCount}/${results.length} uploads. Failed: ${failureCount}.`
-      },
-      results: results,
-      isSubmitting: false
-    });
+    multiUploadState.isSubmitting = false;
+    renderMultiUpload();
   }
 
   function render() {
@@ -936,6 +998,10 @@
 
     if (hash !== routes.single) {
       cancelProcessingPolling();
+    }
+
+    if (hash !== routes.multi) {
+      cancelMultiUploadRun();
     }
 
     if (!isAuthenticated() && hash !== routes.login) {
@@ -951,7 +1017,7 @@
         renderSingleUpload();
         break;
       case routes.multi:
-        renderMultiUpload({ progress: 0, fileCount: 0, results: [] });
+        renderMultiUpload();
         break;
       case routes.login:
       default:
@@ -962,6 +1028,7 @@
 
   logoutButton.addEventListener("click", function () {
     cancelProcessingPolling();
+    cancelMultiUploadRun();
     clearAuth();
     setHash(routes.login);
   });

@@ -631,7 +631,10 @@
     }
 
     multiUploadState.isDragActive = isDragActive;
-    renderMultiUpload();
+    const dropzone = document.getElementById("multiDropzone");
+    if (dropzone) {
+      dropzone.classList.toggle("dropzone-surface-active", isDragActive);
+    }
   }
 
   function bindMultiDropzone() {

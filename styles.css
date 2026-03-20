@@ -92,6 +92,11 @@ input {
   max-width: 680px;
 }
 
+.multi-dropzone-panel,
+.multi-stage-panel {
+  max-width: none;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -228,6 +233,55 @@ input {
   color: var(--danger);
   background: rgba(180, 35, 24, 0.08);
   border-color: rgba(180, 35, 24, 0.16);
+}
+
+.dropzone-surface {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  padding: 48px 24px;
+  text-align: center;
+  border: 2px dashed rgba(29, 78, 216, 0.24);
+  border-radius: calc(var(--radius) + 4px);
+  background:
+    radial-gradient(circle at top, rgba(29, 78, 216, 0.12), transparent 45%),
+    rgba(255, 255, 255, 0.54);
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.dropzone-surface:hover,
+.dropzone-surface:focus-visible,
+.dropzone-surface-active {
+  border-color: rgba(29, 78, 216, 0.56);
+  background:
+    radial-gradient(circle at top, rgba(29, 78, 216, 0.18), transparent 45%),
+    rgba(255, 255, 255, 0.68);
+  transform: translateY(-1px);
+}
+
+.dropzone-surface:focus-visible {
+  outline: none;
+}
+
+.dropzone-icon {
+  width: 72px;
+  height: 72px;
+  color: var(--primary);
+}
+
+.dropzone-copy {
+  justify-items: center;
+}
+
+.dropzone-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.multi-card-stack {
+  gap: 22px;
 }
 
 .progress-wrap {

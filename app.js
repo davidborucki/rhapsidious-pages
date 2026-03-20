@@ -14,8 +14,10 @@
   let activeProcessingPollRun = 0;
   let activeMultiUploadRun = 0;
   let multiUploadState = {
+    stage: "dropzone",
     cards: [],
-    isSubmitting: false
+    isSubmitting: false,
+    isDragActive: false
   };
 
   const routes = {
@@ -61,6 +63,15 @@
   function cancelMultiUploadRun() {
     activeMultiUploadRun += 1;
     multiUploadState.isSubmitting = false;
+  }
+
+  function resetMultiUploadState() {
+    multiUploadState = {
+      stage: "dropzone",
+      cards: [],
+      isSubmitting: false,
+      isDragActive: false
+    };
   }
 
   function isAuthenticated() {
@@ -496,7 +507,8 @@
       guestCsv: "",
       useManualHost: false,
       manualHost: "",
-      status: { type: "info", message: "Ready" }
+      status: { type: "info", message: "Ready" },
+      progress: 0
     };
   }
 
@@ -504,8 +516,46 @@
     return multiUploadState.cards || [];
   }
 
+  function renderDropzoneIcon() {
+    return `
+      <svg class="dropzone-icon" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M32 10l12 12h-8v16h-8V22h-8z" fill="currentColor"></path>
+        <path d="M18 42h28a8 8 0 000-16 13 13 0 00-25-2A10 10 0 0018 42z" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+    `;
+  }
+
+  function setMultiUploadFiles(files) {
+    cancelMultiUploadRun();
+    multiUploadState.cards = Array.from(files || []).map(function (file, index) {
+      return createMultiUploadCard(file, index);
+    });
+    multiUploadState.stage = multiUploadState.cards.length ? "cards" : "dropzone";
+    multiUploadState.isDragActive = false;
+    multiUploadState.isSubmitting = false;
+    renderMultiUpload();
+  }
+
   function isMultiUploadActive(runId) {
     return runId === activeMultiUploadRun && (window.location.hash || routes.multi) === routes.multi;
+  }
+
+  function getUploadProgressForMessage(message) {
+    switch (message) {
+      case "Uploading...":
+      case "Uploading clip...":
+        return 15;
+      case "Transcribing...":
+        return 45;
+      case "Generating metadata...":
+        return 70;
+      case "Finalizing...":
+        return 90;
+      case "Completed":
+        return 100;
+      default:
+        return 0;
+    }
   }
 
   function renderMultiUploadCard(card, index, options) {
@@ -572,11 +622,77 @@
   }
 
   function handleMultiFilesChange(event) {
-    const files = Array.from(event.target.files || []);
-    cancelMultiUploadRun();
-    multiUploadState.cards = files.map(function (file, index) {
-      return createMultiUploadCard(file, index);
+    setMultiUploadFiles(event.target.files || []);
+  }
+
+  function updateMultiDropzoneState(isDragActive) {
+    if (multiUploadState.stage !== "dropzone" || multiUploadState.isSubmitting || multiUploadState.isDragActive === isDragActive) {
+      return;
+    }
+
+    multiUploadState.isDragActive = isDragActive;
+    renderMultiUpload();
+  }
+
+  function bindMultiDropzone() {
+    const fileInput = document.getElementById("multiDropzoneFiles");
+    const dropzone = document.getElementById("multiDropzone");
+    const selectButton = document.getElementById("selectMultiClipButton");
+
+    if (!fileInput || !dropzone || !selectButton) {
+      return;
+    }
+
+    function openPicker() {
+      if (!multiUploadState.isSubmitting && getAuthenticatedUserId() != null && getAuthenticatedUserId() !== "") {
+        fileInput.click();
+      }
+    }
+
+    fileInput.addEventListener("change", handleMultiFilesChange);
+    selectButton.addEventListener("click", openPicker);
+    dropzone.addEventListener("click", function (event) {
+      if (event.target === selectButton) {
+        return;
+      }
+
+      openPicker();
     });
+
+    ["dragenter", "dragover"].forEach(function (eventName) {
+      dropzone.addEventListener(eventName, function (event) {
+        event.preventDefault();
+        updateMultiDropzoneState(true);
+      });
+    });
+
+    dropzone.addEventListener("dragleave", function (event) {
+      event.preventDefault();
+      if (event.relatedTarget && dropzone.contains(event.relatedTarget)) {
+        return;
+      }
+
+      updateMultiDropzoneState(false);
+    });
+
+    dropzone.addEventListener("drop", function (event) {
+      event.preventDefault();
+      updateMultiDropzoneState(false);
+      if (
+        getAuthenticatedUserId() != null &&
+        getAuthenticatedUserId() !== "" &&
+        event.dataTransfer &&
+        event.dataTransfer.files &&
+        event.dataTransfer.files.length
+      ) {
+        setMultiUploadFiles(event.dataTransfer.files);
+      }
+    });
+  }
+
+  function handleMultiStageReset() {
+    cancelMultiUploadRun();
+    resetMultiUploadState();
     renderMultiUpload();
   }
 
@@ -708,47 +824,85 @@
   function renderMultiUpload() {
     const cards = getMultiUploadCards();
     const canSubmit = getAuthenticatedUserId() != null && getAuthenticatedUserId() !== "";
-    const selectionStatus = canSubmit ? null : { type: "error", message: getAuthenticatedUserMessage() };
-    const fileCount = cards.length;
-    const fileSummary = fileCount
-      ? `${fileCount} file${fileCount === 1 ? "" : "s"} selected. Each clip has its own upload card below.`
-      : "Choose one or more clip files to create upload cards.";
+    const isDropzoneStage = multiUploadState.stage !== "cards";
+    const stageStatus = canSubmit ? null : { type: "error", message: getAuthenticatedUserMessage() };
 
     logoutButton.classList.remove("hidden");
     app.innerHTML = `
       <div class="stack">
-        <section class="panel form-panel">
-          <div class="stack">
-            <div class="stack">
-              <h2>Upload Multiple Clips</h2>
-              <p>Select multiple files to create one upload card per clip.</p>
-            </div>
-            ${renderStatus(selectionStatus)}
-            <div class="field">
-              <label for="multiClipFiles">Clip Files</label>
-              <input id="multiClipFiles" name="multiClipFiles" type="file" multiple ${multiUploadState.isSubmitting ? "disabled" : ""} />
-            </div>
-            <div class="actions">
-              <button id="backToDashboardMulti" class="secondary-button" type="button">Back</button>
-            </div>
-            <p>${escapeHtml(fileSummary)}</p>
-          </div>
-        </section>
-        ${cards.length ? `<form id="multiUploadForm" class="stack">${cards
-          .map(function (card, index) {
-            return renderMultiUploadCard(card, index, {
-              isLastCard: index === cards.length - 1,
-              submitDisabled: !canSubmit || multiUploadState.isSubmitting
-            });
-          })
-          .join("")}</form>` : ""}
+        ${isDropzoneStage
+          ? `
+            <section class="panel form-panel multi-dropzone-panel">
+              <div class="stack">
+                <div class="stack">
+                  <h2>Upload Multiple Clips</h2>
+                  <p>Start by dropping in all the clips you want to upload.</p>
+                </div>
+                ${renderStatus(stageStatus)}
+                <input id="multiDropzoneFiles" class="hidden" type="file" multiple />
+                <div id="multiDropzone" class="dropzone-surface ${multiUploadState.isDragActive ? "dropzone-surface-active" : ""}" role="button" tabindex="0">
+                  ${renderDropzoneIcon()}
+                  <div class="stack dropzone-copy">
+                    <p class="dropzone-title">Drag and drop video clips to upload</p>
+                    <p>Or click to select multiple clips</p>
+                  </div>
+                  <button id="selectMultiClipButton" class="primary-button" type="button" ${!canSubmit ? "disabled" : ""}>Select clips</button>
+                </div>
+                <div class="actions">
+                  <button id="backToDashboardMulti" class="secondary-button" type="button">Back</button>
+                </div>
+              </div>
+            </section>
+          `
+          : `
+            <section class="panel form-panel multi-stage-panel">
+              <div class="stack">
+                <div class="stack">
+                  <h2>Upload Multiple Clips</h2>
+                  <p>Each selected file now has its own upload card below.</p>
+                </div>
+                ${renderStatus(stageStatus)}
+                <div class="actions">
+                  <button id="resetMultiStage" class="secondary-button" type="button" ${multiUploadState.isSubmitting ? "disabled" : ""}>Choose different clips</button>
+                  <button id="backToDashboardMulti" class="secondary-button" type="button">Back</button>
+                </div>
+                <p>${escapeHtml(`${cards.length} clip${cards.length === 1 ? "" : "s"} selected in upload order.`)}</p>
+              </div>
+            </section>
+            <form id="multiUploadForm" class="stack multi-card-stack">${cards
+              .map(function (card, index) {
+                return renderMultiUploadCard(card, index, {
+                  isLastCard: index === cards.length - 1,
+                  submitDisabled: !canSubmit || multiUploadState.isSubmitting
+                });
+              })
+              .join("")}</form>
+          `}
       </div>
     `;
 
-    document.getElementById("multiClipFiles").addEventListener("change", handleMultiFilesChange);
     document.getElementById("backToDashboardMulti").addEventListener("click", function () {
       setHash(routes.dashboard);
     });
+
+    if (isDropzoneStage) {
+      bindMultiDropzone();
+      const dropzone = document.getElementById("multiDropzone");
+      if (dropzone) {
+        dropzone.addEventListener("keydown", function (event) {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            const selectButton = document.getElementById("selectMultiClipButton");
+            if (selectButton && !selectButton.disabled) {
+              selectButton.click();
+            }
+          }
+        });
+      }
+      return;
+    }
+
+    document.getElementById("resetMultiStage").addEventListener("click", handleMultiStageReset);
     if (cards.length) {
       document.getElementById("multiUploadForm").addEventListener("submit", handleMultiUploadSubmit);
       bindMultiUploadCardInputs();
@@ -923,6 +1077,7 @@
 
       if (!card.name.trim()) {
         multiUploadState.cards[index].status = { type: "error", message: "Failed: Enter a name before submitting." };
+        multiUploadState.cards[index].progress = 0;
         renderMultiUpload();
         continue;
       }
@@ -934,11 +1089,13 @@
           type: "error",
           message: `Failed: ${error.message || "Clip details are incomplete."}`
         };
+        multiUploadState.cards[index].progress = 0;
         renderMultiUpload();
         continue;
       }
 
       multiUploadState.cards[index].status = { type: "info", message: "Uploading..." };
+      multiUploadState.cards[index].progress = getUploadProgressForMessage("Uploading...");
       renderMultiUpload();
 
       try {
@@ -962,6 +1119,7 @@
               type: statusDetails.type,
               message: statusDetails.message
             };
+            multiUploadState.cards[index].progress = getUploadProgressForMessage(statusDetails.message);
             renderMultiUpload();
           }
         });
@@ -971,6 +1129,7 @@
         }
 
         multiUploadState.cards[index].status = { type: "success", message: "Completed" };
+        multiUploadState.cards[index].progress = 100;
       } catch (error) {
         if (!isMultiUploadActive(uploadRunId)) {
           return;
@@ -980,6 +1139,7 @@
           type: "error",
           message: `Failed: ${error.message || "Upload failed."}`
         };
+        multiUploadState.cards[index].progress = multiUploadState.cards[index].progress || 0;
       }
 
       renderMultiUpload();
@@ -1002,6 +1162,7 @@
 
     if (hash !== routes.multi) {
       cancelMultiUploadRun();
+      resetMultiUploadState();
     }
 
     if (!isAuthenticated() && hash !== routes.login) {

@@ -5,11 +5,11 @@
   const brandLink = document.getElementById("brandLink");
   const primaryNav = document.getElementById("primaryNav");
   const guestNav = document.getElementById("guestNav");
-  const userPill = document.getElementById("userPill");
+  const accountLink = document.getElementById("accountLink");
   const logoutButton = document.getElementById("logoutButton");
   const toastRegion = document.getElementById("toastRegion");
 
-  if (!app || !brandLink || !primaryNav || !guestNav || !userPill || !logoutButton || !toastRegion) {
+  if (!app || !brandLink || !primaryNav || !guestNav || !accountLink || !logoutButton || !toastRegion) {
     return;
   }
 
@@ -18,17 +18,22 @@
   const uploadConfig = config.uploads || {};
   const processingConfig = config.processing || {};
   const feedConfig = config.feed || {};
+  const socialConfig = config.social || {};
+  const searchConfig = config.search || {};
   const profileConfig = config.profile || {};
 
   const routes = {
     login: "#/login",
     signup: "#/signup",
     feed: "#/feed",
+    saved: "#/saved",
+    search: "#/search",
     upload: "#/upload",
-    profile: "#/profile"
+    profile: "#/profile",
+    connections: "#/connections"
   };
 
-  const protectedRoutes = new Set([routes.feed, routes.upload, routes.profile]);
+  const protectedRoutes = new Set([routes.feed, routes.saved, routes.search, routes.upload, routes.profile, routes.connections]);
   const accessTokenStorageKey = authConfig.accessTokenStorageKey || "voxxly_access_token";
   const refreshTokenStorageKey = authConfig.refreshTokenStorageKey || "voxxly_refresh_token";
   const deviceIdStorageKey = authConfig.deviceIdStorageKey || "voxxly_device_id";
@@ -65,10 +70,56 @@
     };
   }
 
-  function createProfileState() {
+  function createProfileState(userId) {
     return {
+      userId: userId ? String(userId) : "",
+      user: null,
       clips: [],
+      reposts: [],
+      repostsVersion: 0,
       counts: null,
+      following: false,
+      followStateKnown: false,
+      followPending: false,
+      activeTab: "posts",
+      loading: false,
+      loaded: false,
+      error: ""
+    };
+  }
+
+  function createSocialState() {
+    return {
+      savedClips: [],
+      repostedClips: [],
+      savedIds: new Set(),
+      repostedIds: new Set(),
+      pendingSaves: new Set(),
+      pendingReposts: new Set(),
+      loadPromise: null,
+      loading: false,
+      loaded: false,
+      error: ""
+    };
+  }
+
+  function createSearchState() {
+    return {
+      query: "",
+      results: [],
+      loading: false,
+      searched: false,
+      error: "",
+      requestId: 0
+    };
+  }
+
+  function createConnectionsState(userId, type) {
+    return {
+      userId: userId ? String(userId) : "",
+      type: type === "following" ? "following" : "followers",
+      owner: null,
+      items: [],
       loading: false,
       loaded: false,
       error: ""
@@ -77,6 +128,9 @@
 
   let feedState = createFeedState();
   let profileState = createProfileState();
+  let socialState = createSocialState();
+  let searchState = createSearchState();
+  let connectionsState = createConnectionsState();
   let uploadState = {
     items: [],
     host: "",
@@ -314,7 +368,8 @@
       body: requestOptions.body
     });
 
-    if ((response.status === 401 || response.status === 403) && useAuth && retryAuth && getRefreshToken()) {
+    const shouldRetryAuth = response.status === 401 || (response.status === 403 && requestOptions.retryForbidden !== false);
+    if (shouldRetryAuth && useAuth && retryAuth && getRefreshToken()) {
       try {
         await refreshAccessToken();
         return requestJson(path, { ...requestOptions, retryAuth: false });
@@ -410,13 +465,24 @@
     brandLink.setAttribute("aria-label", isSignedIn ? "Voxxly Soundbites" : "Voxxly login");
     primaryNav.classList.toggle("hidden", !isSignedIn);
     guestNav.classList.toggle("hidden", isSignedIn);
-    userPill.classList.toggle("hidden", !isSignedIn);
+    accountLink.classList.toggle("hidden", !isSignedIn);
     logoutButton.classList.toggle("hidden", !isSignedIn);
 
     if (isSignedIn) {
-      userPill.textContent = `@${currentUser.username || "account"}`;
+      accountLink.innerHTML = avatarMarkup(currentUser, currentUser.username, "header-avatar");
+      accountLink.setAttribute("aria-label", `Open @${currentUser.username || "your"} profile`);
+      accountLink.setAttribute("title", `@${currentUser.username || "profile"}`);
     } else {
-      userPill.textContent = "";
+      accountLink.innerHTML = "";
+      accountLink.removeAttribute("title");
+    }
+
+    const profileUserId = getHashQueryParam("userId");
+    const isOwnProfile = route === routes.profile && (!profileUserId || (currentUser && String(profileUserId) === String(currentUser.id)));
+    if (isOwnProfile) {
+      accountLink.setAttribute("aria-current", "page");
+    } else {
+      accountLink.removeAttribute("aria-current");
     }
 
     primaryNav.querySelectorAll("[data-route]").forEach(function (link) {
@@ -430,7 +496,7 @@
 
   function focusPageHeading() {
     window.requestAnimationFrame(function () {
-      const heading = app.querySelector("#loginTitle, #signupTitle, #feedTitle, #uploadTitle, #profileTitle") || app.querySelector("h1");
+      const heading = app.querySelector("#loginTitle, #signupTitle, #feedTitle, #savedTitle, #searchTitle, #uploadTitle, #profileTitle, #connectionsTitle") || app.querySelector("h1");
       if (!heading) {
         return;
       }
@@ -443,6 +509,9 @@
     sessionGeneration += 1;
     feedState = createFeedState(getHashQueryParam("clip", pendingProtectedHash || window.location.hash));
     profileState = createProfileState();
+    socialState = createSocialState();
+    searchState = createSearchState();
+    connectionsState = createConnectionsState();
     uploadState = {
       items: [],
       host: "",
@@ -729,6 +798,29 @@
     return `${count} ${count === 1 ? singular : (plural || `${singular}s`)}`;
   }
 
+  function getProfileRoute(userId, tab) {
+    const params = new URLSearchParams();
+    if (userId) {
+      params.set("userId", String(userId));
+    }
+    if (tab === "reposts") {
+      params.set("tab", "reposts");
+    }
+    const query = params.toString();
+    return `${routes.profile}${query ? `?${query}` : ""}`;
+  }
+
+  function renderSocialButton(kind, clipId) {
+    const isSave = kind === "save";
+    const active = isSave ? socialState.savedIds.has(String(clipId)) : socialState.repostedIds.has(String(clipId));
+    const actionPending = isSave ? socialState.pendingSaves.has(String(clipId)) : socialState.pendingReposts.has(String(clipId));
+    const statePending = !socialState.loaded && !socialState.error;
+    const pending = actionPending || statePending;
+    const label = isSave ? (active ? "Saved" : "Save") : (active ? "Reposted" : "Repost");
+    const dataName = isSave ? "save-clip" : "repost-clip";
+    return `<button class="social-action${active ? " is-active" : ""}" type="button" data-${dataName}="${escapeHtml(clipId)}" aria-pressed="${active}" ${statePending ? 'aria-busy="true"' : ""} ${pending ? "disabled" : ""}><span class="social-action-symbol" aria-hidden="true">${isSave ? "＋" : "↻"}</span><span data-social-label>${label}</span></button>`;
+  }
+
   function renderFeedItem(item, index) {
     const creator = creatorCache.get(String(item.iosUserId)) || null;
     const creatorName = (creator && creator.username) || item.creatorName || "Voxxly creator";
@@ -744,9 +836,7 @@
     if (item.sourcePlatform) {
       detailBits.push(item.sourcePlatform);
     }
-    if (Number(item.repostedByCount) > 0) {
-      detailBits.push(pluralize(Number(item.repostedByCount), "repost"));
-    }
+    const creatorRoute = getProfileRoute(item.iosUserId);
 
     return `
       <article class="soundbite-card" data-feed-card data-clip-id="${escapeHtml(item.id)}" aria-labelledby="clipTitle-${escapeHtml(item.id)}">
@@ -769,18 +859,21 @@
         </div>
         <div class="soundbite-details">
           <div>
-            <div class="creator-row">
+            <a class="creator-row creator-link" href="${escapeHtml(creatorRoute)}" aria-label="View @${escapeHtml(creatorName)} profile">
               ${avatarMarkup(creator, creatorName)}
               <div>
                 <p class="creator-name">@${escapeHtml(creatorName)}</p>
                 <p class="creator-meta">Recommended for you</p>
               </div>
-            </div>
+            </a>
             <h2 id="clipTitle-${escapeHtml(item.id)}" class="soundbite-title">${escapeHtml(item.name || "Untitled soundbite")}</h2>
-            <p class="soundbite-copy">${escapeHtml(detailBits.join(" · ") || "A fresh moment from your personalized Voxxly mix.")}</p>
+            ${detailBits.length ? `<p class="soundbite-copy">${escapeHtml(detailBits.join(" · "))}</p>` : ""}
           </div>
           <div class="soundbite-actions">
-            <button class="secondary-button" type="button" data-share-clip="${escapeHtml(item.id)}">Share soundbite</button>
+            <div class="social-action-row" aria-label="Soundbite actions">
+              ${renderSocialButton("save", item.id)}
+              ${renderSocialButton("repost", item.id)}
+            </div>
             ${fullEpisodeUrl
               ? `<a class="quiet-button" data-full-episode="${escapeHtml(item.id)}" href="${escapeHtml(fullEpisodeUrl)}" target="_blank" rel="noreferrer">Open full episode</a>`
               : (sourceUrl ? `<a class="quiet-button" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer">Open source</a>` : "")}
@@ -827,7 +920,6 @@
       <section class="feed-page" aria-labelledby="feedTitle">
         <div class="feed-heading-row">
           <div>
-            <p class="page-kicker">Personalized timeline</p>
             <h1 id="feedTitle" class="page-title">Soundbites</h1>
           </div>
           <button id="refreshFeed" class="secondary-button" type="button">Refresh my mix</button>
@@ -865,6 +957,10 @@
     bindFeedPlayers();
     bindFeedSentinel();
 
+    if (!socialState.loaded && !socialState.loading && !socialState.error) {
+      window.queueMicrotask(loadSocialCollections);
+    }
+
     if (savedScrollY != null) {
       window.requestAnimationFrame(function () {
         window.scrollTo({ top: savedScrollY, behavior: "auto" });
@@ -877,12 +973,23 @@
   }
 
   function bindFeedItemActions() {
-    app.querySelectorAll("[data-share-clip]").forEach(function (button) {
+    app.querySelectorAll("[data-save-clip]").forEach(function (button) {
       if (button.dataset.actionBound === "true") {
         return;
       }
       button.dataset.actionBound = "true";
-      button.addEventListener("click", handleShareClip);
+      button.addEventListener("click", function (event) {
+        handleSocialToggle(event, "save");
+      });
+    });
+    app.querySelectorAll("[data-repost-clip]").forEach(function (button) {
+      if (button.dataset.actionBound === "true") {
+        return;
+      }
+      button.dataset.actionBound = "true";
+      button.addEventListener("click", function (event) {
+        handleSocialToggle(event, "repost");
+      });
     });
     app.querySelectorAll("[data-full-episode]").forEach(function (link) {
       if (link.dataset.actionBound === "true") {
@@ -895,6 +1002,188 @@
         reportInteraction(clipId, record.watchedSec, { hasClickedToFullEpisode: true });
       });
     });
+  }
+
+  function updateSocialActionButtons(clipId) {
+    const selector = clipId
+      ? `[data-save-clip="${String(clipId)}"], [data-repost-clip="${String(clipId)}"]`
+      : "[data-save-clip], [data-repost-clip]";
+    app.querySelectorAll(selector).forEach(function (button) {
+      const isSave = button.hasAttribute("data-save-clip");
+      const id = String(button.getAttribute(isSave ? "data-save-clip" : "data-repost-clip"));
+      const active = isSave ? socialState.savedIds.has(id) : socialState.repostedIds.has(id);
+      const actionPending = isSave ? socialState.pendingSaves.has(id) : socialState.pendingReposts.has(id);
+      const statePending = !socialState.loaded && !socialState.error;
+      const pending = actionPending || statePending;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+      button.disabled = pending;
+      if (statePending) {
+        button.setAttribute("aria-busy", "true");
+      } else {
+        button.removeAttribute("aria-busy");
+      }
+      const label = button.querySelector("[data-social-label]");
+      if (label) {
+        label.textContent = isSave ? (active ? "Saved" : "Save") : (active ? "Reposted" : "Repost");
+      }
+    });
+  }
+
+  function findKnownClip(clipId) {
+    const id = String(clipId);
+    return feedState.items.concat(socialState.savedClips, socialState.repostedClips, profileState.clips, profileState.reposts).find(function (clip) {
+      return clip && String(clip.id) === id;
+    }) || null;
+  }
+
+  function loadSocialCollections() {
+    if (!currentUser || socialState.loaded) {
+      return Promise.resolve();
+    }
+    if (socialState.loading) {
+      return socialState.loadPromise || Promise.resolve();
+    }
+
+    const state = socialState;
+    const generation = sessionGeneration;
+    const userId = currentUser.id;
+    const isCurrentRequest = function () {
+      return socialState === state && sessionGeneration === generation && currentUser && String(currentUser.id) === String(userId);
+    };
+    state.loading = true;
+    state.error = "";
+    updateSocialActionButtons();
+    if (getRoute() === routes.saved) {
+      renderSaved();
+    }
+    const savedPath = fillPathTemplate(socialConfig.savedListPathTemplate || "/ios/users/{userId}/saved-clips", { userId: userId });
+    const repostedPath = fillPathTemplate(socialConfig.repostedListPathTemplate || "/ios/users/{userId}/reposted-clips", { userId: userId });
+    const task = (async function () {
+      try {
+        const results = await Promise.all([requestJson(savedPath), requestJson(repostedPath)]);
+        if (!isCurrentRequest()) {
+          return;
+        }
+        if (!Array.isArray(results[0]) || !Array.isArray(results[1])) {
+          throw new ApiError("Your social collections returned an unexpected response.", 500, results);
+        }
+        await Promise.all(Array.from(new Set(results[0].concat(results[1]).map(function (clip) {
+          return clip && clip.iosUserId;
+        }).filter(Boolean))).map(loadCreator));
+        if (!isCurrentRequest()) {
+          return;
+        }
+        state.savedClips = results[0];
+        state.repostedClips = results[1];
+        state.savedIds = new Set(results[0].map(function (clip) { return String(clip.id); }));
+        state.repostedIds = new Set(results[1].map(function (clip) { return String(clip.id); }));
+        state.loaded = true;
+      } catch (error) {
+        if (isCurrentRequest()) {
+          state.error = error.message || "Unable to load your saved clips and reposts.";
+        }
+      } finally {
+        state.loading = false;
+        if (state.loadPromise === task) {
+          state.loadPromise = null;
+        }
+        if (!isCurrentRequest()) {
+          return;
+        }
+        updateSocialActionButtons();
+        if (getRoute() === routes.saved) {
+          renderSaved();
+        }
+      }
+    })();
+    state.loadPromise = task;
+    return task;
+  }
+
+  async function handleSocialToggle(event, kind) {
+    const button = event.currentTarget;
+    const isSave = kind === "save";
+    const clipId = String(button.getAttribute(isSave ? "data-save-clip" : "data-repost-clip"));
+    if (!currentUser || !clipId) {
+      return;
+    }
+
+    const neededStateSync = !socialState.loaded;
+    if (neededStateSync) {
+      await loadSocialCollections();
+    }
+    if (!currentUser || !socialState.loaded) {
+      showToast(socialState.error || "Your social actions are unavailable right now.");
+      return;
+    }
+    if (neededStateSync) {
+      showToast("Save and repost status updated. Choose your action again.");
+      return;
+    }
+
+    const state = socialState;
+    const generation = sessionGeneration;
+    const userId = currentUser.id;
+    const activeSet = isSave ? state.savedIds : state.repostedIds;
+    const pendingSet = isSave ? state.pendingSaves : state.pendingReposts;
+    if (pendingSet.has(clipId)) {
+      return;
+    }
+    const wasActive = activeSet.has(clipId);
+    pendingSet.add(clipId);
+    updateSocialActionButtons(clipId);
+
+    try {
+      const path = isSave ? (socialConfig.savedPath || "/ios/saved-clips") : (socialConfig.repostedPath || "/ios/reposted-clips");
+      await requestJson(path, {
+        method: wasActive ? "DELETE" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ iosUserId: Number(userId), iosClipId: Number(clipId) })
+      });
+      if (socialState !== state || sessionGeneration !== generation || !currentUser || String(currentUser.id) !== String(userId)) {
+        return;
+      }
+
+      const collection = isSave ? state.savedClips : state.repostedClips;
+      if (wasActive) {
+        activeSet.delete(clipId);
+        const filtered = collection.filter(function (clip) { return String(clip.id) !== clipId; });
+        if (isSave) {
+          state.savedClips = filtered;
+        } else {
+          state.repostedClips = filtered;
+        }
+      } else {
+        activeSet.add(clipId);
+        const clip = findKnownClip(clipId);
+        if (clip && !collection.some(function (candidate) { return String(candidate.id) === clipId; })) {
+          collection.unshift(clip);
+        }
+        const record = getWatchRecord(clipId);
+        reportInteraction(clipId, record.watchedSec, isSave ? { hasSavedClip: true } : { hasRepostedClip: true });
+      }
+
+      if (!isSave && profileState.userId === String(userId)) {
+        profileState.reposts = state.repostedClips.slice();
+        profileState.repostsVersion += 1;
+      }
+      showToast(isSave
+        ? (wasActive ? "Removed from Saved." : "Saved to your collection.")
+        : (wasActive ? "Repost removed." : "Reposted to your profile."));
+    } catch (error) {
+      showToast(error.message || `Unable to ${isSave ? "save" : "repost"} this clip.`);
+    } finally {
+      if (socialState === state) {
+        pendingSet.delete(clipId);
+        updateSocialActionButtons(clipId);
+        if (getRoute() === routes.saved) {
+          renderSaved();
+        } else if (getRoute() === routes.profile && profileState.userId === String(userId)) {
+          renderProfile();
+        }
+      }
+    }
   }
 
   function updateFeedFooter() {
@@ -1253,35 +1542,6 @@
     feedVisibilityRatios = new Map();
   }
 
-  async function handleShareClip(event) {
-    const clipId = event.currentTarget.getAttribute("data-share-clip");
-    const clip = feedState.items.find(function (item) { return String(item.id) === String(clipId); });
-    const shareUrl = new URL(window.location.href);
-    shareUrl.hash = `#/feed?clip=${encodeURIComponent(clipId)}`;
-    const shareData = {
-      title: clip ? `${clip.name} · Voxxly` : "Voxxly Soundbite",
-      text: clip ? `Listen to “${clip.name}” on Voxxly.` : "Listen to this Soundbite on Voxxly.",
-      url: shareUrl.toString()
-    };
-
-    try {
-      if (window.navigator.share) {
-        await window.navigator.share(shareData);
-      } else if (window.navigator.clipboard) {
-        await window.navigator.clipboard.writeText(shareData.url);
-        showToast("Soundbite link copied.");
-      } else {
-        throw new Error("Sharing is unavailable in this browser.");
-      }
-      const record = getWatchRecord(clipId);
-      reportInteraction(clipId, record.watchedSec, { hasSharedClip: true });
-    } catch (error) {
-      if (error && error.name !== "AbortError") {
-        showToast("This browser could not share the link.");
-      }
-    }
-  }
-
   function getDefaultClipName(file) {
     return String(file.name || "Untitled clip").replace(/\.[^/.]+$/, "") || file.name;
   }
@@ -1375,7 +1635,6 @@
     app.innerHTML = `
       <section class="page-wrap" aria-labelledby="uploadTitle">
         <header class="page-header">
-          <p class="page-kicker">Creator studio</p>
           <h1 id="uploadTitle" class="page-title">Upload once.<br />Or all at once.</h1>
           <p class="page-description">Choose one clip or build a full queue. Voxxly uploads each file safely in order and follows its processing progress.</p>
         </header>
@@ -1806,47 +2065,269 @@
     return 0;
   }
 
-  function renderProfileClip(clip) {
+  function renderSavedClip(clip) {
     const streamUrl = getSafeMediaUrl(clip.streamUrl, `/iosclips/${clip.id}/stream`);
     const posterUrl = getSafeMediaUrl(clip.thumbnailUrl);
+    const creator = creatorCache.get(String(clip.iosUserId)) || null;
+    const creatorName = (creator && creator.username) || clip.creatorName || "Voxxly creator";
+    return `
+      <article class="profile-clip saved-clip">
+        <video controls playsinline preload="metadata" src="${escapeHtml(streamUrl)}" ${posterUrl ? `poster="${escapeHtml(posterUrl)}"` : ""} aria-label="Play ${escapeHtml(clip.name || "soundbite")}"></video>
+        <div class="profile-clip-copy">
+          <a class="clip-creator-link" href="${escapeHtml(getProfileRoute(clip.iosUserId))}">@${escapeHtml(creatorName)}</a>
+          <h3 title="${escapeHtml(clip.name || "Untitled soundbite")}">${escapeHtml(clip.name || "Untitled soundbite")}</h3>
+          <div class="collection-actions">${renderSocialButton("save", clip.id)}</div>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderSaved() {
+    let content = "";
+    if (socialState.loading && !socialState.loaded) {
+      content = `<div class="skeleton skeleton-card" role="status" aria-label="Loading saved clips"></div>`;
+    } else if (socialState.error && !socialState.loaded) {
+      content = `
+        <div class="panel error-state">
+          <div class="stack-tight">
+            <h2>We couldn’t load your saved clips.</h2>
+            <p class="muted">${escapeHtml(socialState.error)}</p>
+            <div class="actions" style="justify-content:center"><button id="retrySaved" class="primary-button" type="button">Try again</button></div>
+          </div>
+        </div>
+      `;
+    } else if (socialState.savedClips.length) {
+      content = `<div class="clip-grid">${socialState.savedClips.map(renderSavedClip).join("")}</div>`;
+    } else {
+      content = `
+        <div class="panel empty-state">
+          <div class="stack-tight">
+            <h2>No saved clips yet.</h2>
+            <p class="muted">Save a Soundbite and it will appear here.</p>
+            <div class="actions" style="justify-content:center"><a class="primary-button" href="#/feed">Browse Soundbites</a></div>
+          </div>
+        </div>
+      `;
+    }
+
+    app.innerHTML = `
+      <section class="page-wrap" aria-labelledby="savedTitle">
+        <div class="simple-page-header">
+          <div>
+            <h1 id="savedTitle" class="page-title">Saved</h1>
+            <p class="page-description">The clips you want to come back to.</p>
+          </div>
+          <button id="refreshSaved" class="secondary-button" type="button" ${socialState.loading ? "disabled" : ""}>Refresh</button>
+        </div>
+        ${content}
+      </section>
+    `;
+
+    bindFeedItemActions();
+    const refreshButton = document.getElementById("refreshSaved");
+    if (refreshButton) {
+      refreshButton.addEventListener("click", function () {
+        socialState.loaded = false;
+        socialState.error = "";
+        renderSaved();
+        loadSocialCollections();
+      });
+    }
+    const retryButton = document.getElementById("retrySaved");
+    if (retryButton) {
+      retryButton.addEventListener("click", function () {
+        socialState.error = "";
+        loadSocialCollections();
+      });
+    }
+    if (!socialState.loaded && !socialState.loading && !socialState.error) {
+      window.queueMicrotask(loadSocialCollections);
+    }
+  }
+
+  function renderSearchResult(user) {
+    return `
+      <a class="user-result" href="${escapeHtml(getProfileRoute(user.id))}">
+        ${avatarMarkup(user, user.username, "user-result-avatar")}
+        <span><strong>${escapeHtml(user.username || "Voxxly user")}</strong><small>@${escapeHtml(user.username || "user")}</small></span>
+        <span class="result-arrow" aria-hidden="true">→</span>
+      </a>
+    `;
+  }
+
+  function renderSearch() {
+    let results = "";
+    if (searchState.loading) {
+      results = `<div class="search-loading" role="status">Searching profiles…</div>`;
+    } else if (searchState.error) {
+      results = `<div class="status status-error" role="alert">${escapeHtml(searchState.error)}</div>`;
+    } else if (searchState.results.length) {
+      results = `<div class="user-results">${searchState.results.map(renderSearchResult).join("")}</div>`;
+    } else if (searchState.searched) {
+      results = `<div class="panel empty-state"><div><h2>No profiles found.</h2><p class="muted">Try the beginning of another username.</p></div></div>`;
+    } else {
+      results = `<div class="search-prompt"><p>Search by username to find people and explore their posts and reposts.</p></div>`;
+    }
+
+    app.innerHTML = `
+      <section class="page-wrap search-page" aria-labelledby="searchTitle">
+        <header class="page-header">
+          <h1 id="searchTitle" class="page-title">Search</h1>
+          <p class="page-description">Find people on Voxxly.</p>
+        </header>
+        <form id="profileSearchForm" class="search-form" role="search">
+          <label class="sr-only" for="profileSearchInput">Search usernames</label>
+          <input id="profileSearchInput" name="query" type="search" autocomplete="off" value="${escapeHtml(searchState.query)}" placeholder="Search @username" maxlength="33" required />
+          <button class="primary-button" type="submit" ${searchState.loading ? "disabled" : ""}>Search</button>
+        </form>
+        <div class="search-results" aria-live="polite">${results}</div>
+      </section>
+    `;
+
+    document.getElementById("profileSearchForm").addEventListener("submit", handleProfileSearch);
+  }
+
+  async function handleProfileSearch(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const query = String(form.elements.query.value || "").trim().replace(/^@+/, "");
+    if (!query || query.length > 32 || !/^[A-Za-z0-9._-]+$/.test(query)) {
+      searchState.query = query;
+      searchState.results = [];
+      searchState.searched = true;
+      searchState.error = "Use 1–32 letters, numbers, periods, underscores, or dashes.";
+      renderSearch();
+      return;
+    }
+
+    const state = searchState;
+    const generation = sessionGeneration;
+    const userId = currentUser && currentUser.id;
+    const requestId = state.requestId + 1;
+    state.requestId = requestId;
+    state.query = query;
+    state.loading = true;
+    state.searched = true;
+    state.error = "";
+    renderSearch();
+
+    try {
+      const url = new URL(getApiUrl(searchConfig.usersPath || "/ios/users/search"));
+      url.searchParams.set("q", query);
+      const payload = await requestJson(url.toString());
+      if (searchState !== state || state.requestId !== requestId || sessionGeneration !== generation || !currentUser || String(currentUser.id) !== String(userId)) {
+        return;
+      }
+      if (!Array.isArray(payload)) {
+        throw new ApiError("Profile search returned an unexpected response.", 500, payload);
+      }
+      state.results = payload.map(function (user) {
+        return { id: user.id, username: user.username, profilePhotoUrl: user.profilePhotoUrl };
+      });
+    } catch (error) {
+      if (searchState === state && state.requestId === requestId) {
+        state.results = [];
+        state.error = error.message || "Unable to search profiles right now.";
+      }
+    } finally {
+      if (searchState === state && state.requestId === requestId) {
+        state.loading = false;
+        if (getRoute() === routes.search) {
+          renderSearch();
+          const input = document.getElementById("profileSearchInput");
+          if (input) {
+            input.focus();
+          }
+        }
+      }
+    }
+  }
+
+  function renderProfileClip(clip, options) {
+    const renderOptions = options || {};
+    const streamUrl = getSafeMediaUrl(clip.streamUrl, `/iosclips/${clip.id}/stream`);
+    const posterUrl = getSafeMediaUrl(clip.thumbnailUrl);
+    const creator = creatorCache.get(String(clip.iosUserId)) || null;
+    const creatorName = (creator && creator.username) || clip.creatorName || "Voxxly creator";
     return `
       <article class="profile-clip">
         <video controls playsinline preload="metadata" src="${escapeHtml(streamUrl)}" ${posterUrl ? `poster="${escapeHtml(posterUrl)}"` : ""} aria-label="Play ${escapeHtml(clip.name || "soundbite")}"></video>
         <div class="profile-clip-copy">
+          ${renderOptions.showCreator ? `<a class="clip-creator-link" href="${escapeHtml(getProfileRoute(clip.iosUserId))}">@${escapeHtml(creatorName)}</a>` : ""}
           <h3 title="${escapeHtml(clip.name || "Untitled soundbite")}">${escapeHtml(clip.name || "Untitled soundbite")}</h3>
-          <p>Soundbite #${escapeHtml(clip.id)}</p>
         </div>
       </article>
     `;
   }
 
   function renderProfile() {
-    const clipCount = profileState.clips.length;
-    const followerCount = getFollowCount(profileState.counts, ["followerCount", "followersCount", "followers"]);
-    const followingCount = getFollowCount(profileState.counts, ["followingCount", "followedCount", "following"]);
+    const state = profileState;
+    const targetUserId = state.userId || (currentUser && String(currentUser.id)) || "";
+    const isOwnProfile = currentUser && String(currentUser.id) === String(targetUserId);
+    const knownUser = state.user || (isOwnProfile ? currentUser : null);
+
+    if (!knownUser) {
+      const unavailable = Boolean(state.error);
+      app.innerHTML = `
+        <section class="page-wrap" aria-labelledby="profileTitle">
+          <header class="page-header">
+            <h1 id="profileTitle" class="page-title">${unavailable ? "Profile unavailable" : "Profile"}</h1>
+          </header>
+          ${unavailable
+            ? `<div class="panel error-state"><div class="stack-tight"><h2>We couldn’t load this profile.</h2><p class="muted">${escapeHtml(state.error)}</p><div class="actions" style="justify-content:center"><a class="secondary-button" href="#/search">Back to Search</a><button id="retryProfile" class="primary-button" type="button">Try again</button></div></div></div>`
+            : `<div class="skeleton skeleton-card" role="status" aria-label="Loading profile"></div>`}
+        </section>
+      `;
+
+      const retryButton = document.getElementById("retryProfile");
+      if (retryButton) {
+        retryButton.addEventListener("click", function () {
+          state.error = "";
+          loadProfile();
+        });
+      }
+      if (!state.loaded && !state.loading && !state.error) {
+        window.queueMicrotask(loadProfile);
+      }
+      return;
+    }
+
+    const user = knownUser;
+    const clipCount = state.clips.length;
+    const followerCount = getFollowCount(state.counts, ["followerCount", "followersCount", "followers"]);
+    const followingCount = getFollowCount(state.counts, ["followingCount", "followedCount", "following"]);
+    const followerDisplay = state.counts ? formatCount(followerCount) : "—";
+    const followingDisplay = state.counts ? formatCount(followingCount) : "—";
+    const activeCollection = state.activeTab === "reposts" ? state.reposts : state.clips;
     let clipsMarkup = "";
 
-    if ((!profileState.loaded && !profileState.error) || (profileState.loading && !profileState.loaded)) {
-      clipsMarkup = `<div class="skeleton skeleton-card" role="status" aria-label="Loading your videos"></div>`;
-    } else if (profileState.error) {
+    if ((!state.loaded && !state.error) || (state.loading && !state.loaded)) {
+      clipsMarkup = `<div class="skeleton skeleton-card" role="status" aria-label="Loading profile clips"></div>`;
+    } else if (state.error) {
       clipsMarkup = `
         <div class="panel error-state">
           <div class="stack-tight">
-            <h2>We couldn’t load your videos.</h2>
-            <p class="muted">${escapeHtml(profileState.error)}</p>
+            <h2>We couldn’t load this profile.</h2>
+            <p class="muted">${escapeHtml(state.error)}</p>
             <div class="actions" style="justify-content:center"><button id="retryProfile" class="primary-button" type="button">Try again</button></div>
           </div>
         </div>
       `;
-    } else if (clipCount) {
-      clipsMarkup = `<div class="clip-grid">${profileState.clips.map(renderProfileClip).join("")}</div>`;
+    } else if (activeCollection.length) {
+      clipsMarkup = `<div class="clip-grid">${activeCollection.map(function (clip) {
+        return renderProfileClip(clip, { showCreator: state.activeTab === "reposts" });
+      }).join("")}</div>`;
     } else {
+      const emptyTitle = state.activeTab === "reposts" ? "No reposts yet." : "No posts yet.";
+      const emptyCopy = state.activeTab === "reposts"
+        ? `${isOwnProfile ? "Clips you repost" : "Clips reposted by this user"} will appear here.`
+        : (isOwnProfile ? "Your uploaded clips will appear here." : "This user has not posted any clips yet.");
       clipsMarkup = `
         <div class="panel empty-state">
           <div class="stack-tight">
-            <h2>No uploads on your profile yet.</h2>
-            <p class="muted">Accounts with administrator upload access can add one clip or an entire queue from the upload studio.</p>
-            <div class="actions" style="justify-content:center"><a class="primary-button" href="#/upload">Open upload studio</a></div>
+            <h2>${escapeHtml(emptyTitle)}</h2>
+            <p class="muted">${escapeHtml(emptyCopy)}</p>
+            ${isOwnProfile && state.activeTab === "posts" ? `<div class="actions" style="justify-content:center"><a class="primary-button" href="#/upload">Upload clips</a></div>` : ""}
           </div>
         </div>
       `;
@@ -1855,27 +2336,32 @@
     app.innerHTML = `
       <section class="page-wrap" aria-labelledby="profileTitle">
         <div class="panel profile-hero">
-          ${avatarMarkup(currentUser, currentUser.username, "profile-avatar")}
-          <div>
-            <p class="page-kicker">Your profile</p>
-            <h1 id="profileTitle" class="profile-name">${escapeHtml(currentUser.username || "Voxxly creator")}</h1>
-            <p class="profile-handle">${escapeHtml(currentUser.email || "")}</p>
+          ${avatarMarkup(user, user.username, "profile-avatar")}
+          <div class="profile-identity">
+            <h1 id="profileTitle" class="profile-name">${escapeHtml(user.username || "Voxxly creator")}</h1>
+            <p class="profile-handle">@${escapeHtml(user.username || "creator")}</p>
+            ${!isOwnProfile && state.loaded
+              ? (state.followStateKnown
+                ? `<button id="followProfile" class="${state.following ? "secondary-button" : "primary-button"} follow-button" type="button" aria-pressed="${state.following}" ${state.followPending ? "disabled" : ""}>${state.followPending ? "Updating…" : (state.following ? "Following" : "Follow")}</button>`
+                : `<button class="secondary-button follow-button" type="button" disabled>Follow unavailable</button>`)
+              : ""}
           </div>
           <div class="profile-stats" aria-label="Profile statistics">
-            <div class="profile-stat"><strong>${formatCount(clipCount)}</strong><span>Videos</span></div>
-            <div class="profile-stat"><strong>${formatCount(followerCount)}</strong><span>Followers</span></div>
-            <div class="profile-stat"><strong>${formatCount(followingCount)}</strong><span>Following</span></div>
+            <div class="profile-stat"><strong>${formatCount(clipCount)}</strong><span>Posts</span></div>
+            <a class="profile-stat" href="${routes.connections}?userId=${encodeURIComponent(targetUserId)}&type=followers"><strong>${followerDisplay}</strong><span>Followers</span></a>
+            <a class="profile-stat" href="${routes.connections}?userId=${encodeURIComponent(targetUserId)}&type=following"><strong>${followingDisplay}</strong><span>Following</span></a>
           </div>
         </div>
-        <section class="profile-section" aria-labelledby="videosTitle">
+        <section class="profile-section" aria-labelledby="profileClipsTitle">
           <div class="profile-section-head">
-            <div>
-              <p class="page-kicker">Your library</p>
-              <h2 id="videosTitle" class="section-title">Uploaded videos</h2>
-            </div>
+            <nav class="profile-tabs" aria-label="Profile clips">
+              <a class="profile-tab${state.activeTab === "posts" ? " is-active" : ""}" href="${escapeHtml(getProfileRoute(targetUserId))}" ${state.activeTab === "posts" ? 'aria-current="page"' : ""}>Posts <span>${formatCount(state.clips.length)}</span></a>
+              <a class="profile-tab${state.activeTab === "reposts" ? " is-active" : ""}" href="${escapeHtml(getProfileRoute(targetUserId, "reposts"))}" ${state.activeTab === "reposts" ? 'aria-current="page"' : ""}>Reposts <span>${formatCount(state.reposts.length)}</span></a>
+            </nav>
+            <h2 id="profileClipsTitle" class="sr-only">${state.activeTab === "reposts" ? "Reposted clips" : "Posted clips"}</h2>
             <div class="actions">
-              <button id="refreshProfile" class="secondary-button" type="button" ${profileState.loading ? "disabled" : ""}>Refresh</button>
-              <a class="primary-button" href="#/upload">Upload clips</a>
+              <button id="refreshProfile" class="secondary-button" type="button" ${state.loading ? "disabled" : ""}>Refresh</button>
+              ${isOwnProfile ? `<a class="primary-button" href="#/upload">Upload clips</a>` : ""}
             </div>
           </div>
           ${clipsMarkup}
@@ -1886,31 +2372,42 @@
     const refreshButton = document.getElementById("refreshProfile");
     if (refreshButton) {
       refreshButton.addEventListener("click", function () {
-        profileState.loaded = false;
-        profileState.error = "";
+        state.loaded = false;
+        state.error = "";
+        renderProfile();
         loadProfile();
       });
     }
     const retryButton = document.getElementById("retryProfile");
     if (retryButton) {
-      retryButton.addEventListener("click", loadProfile);
+      retryButton.addEventListener("click", function () {
+        state.error = "";
+        loadProfile();
+      });
     }
 
-    if (!profileState.loaded && !profileState.loading) {
+    const followButton = document.getElementById("followProfile");
+    if (followButton) {
+      followButton.addEventListener("click", handleFollowToggle);
+    }
+
+    if (!profileState.loaded && !profileState.loading && !profileState.error) {
       window.queueMicrotask(loadProfile);
     }
   }
 
   async function loadProfile() {
-    if (!currentUser || profileState.loading) {
+    if (!currentUser || profileState.loading || !profileState.userId) {
       return;
     }
 
     const state = profileState;
     const generation = sessionGeneration;
-    const userId = currentUser.id;
+    const viewerId = currentUser.id;
+    const targetUserId = state.userId;
+    const repostsVersion = state.repostsVersion;
     const isCurrentRequest = function () {
-      return profileState === state && sessionGeneration === generation && currentUser && String(currentUser.id) === String(userId);
+      return profileState === state && sessionGeneration === generation && currentUser && String(currentUser.id) === String(viewerId) && state.userId === String(targetUserId);
     };
     state.loading = true;
     state.error = "";
@@ -1918,32 +2415,213 @@
       renderProfile();
     }
 
-    const clipsPath = fillPathTemplate(profileConfig.clipsPathTemplate || "/ios/users/{userId}/clips", { userId: userId });
-    const countsPath = fillPathTemplate(profileConfig.followCountsPathTemplate || "/ios/users/{userId}/follow-counts", { userId: userId });
+    const userPath = fillPathTemplate(profileConfig.userPathTemplate || "/ios/users/{userId}", { userId: targetUserId });
+    const clipsPath = fillPathTemplate(profileConfig.clipsPathTemplate || "/ios/users/{userId}/clips", { userId: targetUserId });
+    const repostedPath = fillPathTemplate(profileConfig.repostedClipsPathTemplate || "/ios/users/{userId}/reposted-clips", { userId: targetUserId });
+    const countsPath = fillPathTemplate(profileConfig.followCountsPathTemplate || "/ios/users/{userId}/follow-counts", { userId: targetUserId });
+    const followStatePath = fillPathTemplate(socialConfig.followStatePathTemplate || "/ios/users/{viewerId}/follows/{creatorId}", { viewerId: viewerId, creatorId: targetUserId });
 
     try {
-      const clips = await requestJson(clipsPath);
+      const results = await Promise.all([
+        String(targetUserId) === String(viewerId) ? Promise.resolve(currentUser) : requestJson(userPath),
+        requestJson(clipsPath),
+        requestJson(repostedPath),
+        requestJson(countsPath).catch(function () { return null; }),
+        String(targetUserId) === String(viewerId) ? Promise.resolve({ following: false }) : requestJson(followStatePath).catch(function () { return null; })
+      ]);
       if (!isCurrentRequest()) {
         return;
       }
-      if (!Array.isArray(clips)) {
-        throw new ApiError("Your profile returned an unexpected video list.", 500, clips);
+      if (!Array.isArray(results[1]) || !Array.isArray(results[2])) {
+        throw new ApiError("This profile returned an unexpected clip list.", 500, results);
       }
-      const counts = await requestJson(countsPath).catch(function () { return null; });
+      await Promise.all(Array.from(new Set(results[2].map(function (clip) { return clip.iosUserId; }).filter(Boolean))).map(loadCreator));
       if (!isCurrentRequest()) {
         return;
       }
-      state.clips = clips;
-      state.counts = counts;
+      state.user = { id: results[0].id, username: results[0].username, profilePhotoUrl: results[0].profilePhotoUrl };
+      state.clips = results[1];
+      if (state.repostsVersion === repostsVersion) {
+        state.reposts = results[2];
+      }
+      state.counts = results[3];
+      state.followStateKnown = String(targetUserId) === String(viewerId) || Boolean(results[4] && typeof results[4].following === "boolean");
+      state.following = Boolean(results[4] && results[4].following);
       state.loaded = true;
     } catch (error) {
       if (isCurrentRequest()) {
-        state.error = error.message || "Unable to load your profile videos.";
+        state.error = error.message || "Unable to load this profile.";
       }
     } finally {
       state.loading = false;
       if (isCurrentRequest() && getRoute() === routes.profile) {
         renderProfile();
+      }
+    }
+  }
+
+  async function handleFollowToggle() {
+    if (!currentUser || !profileState.followStateKnown || profileState.followPending || !profileState.userId || String(profileState.userId) === String(currentUser.id)) {
+      return;
+    }
+
+    const state = profileState;
+    const generation = sessionGeneration;
+    const viewerId = currentUser.id;
+    const targetUserId = state.userId;
+    const wasFollowing = state.following;
+    const activeButton = document.getElementById("followProfile");
+    state.followPending = true;
+    if (activeButton) {
+      activeButton.disabled = true;
+      activeButton.textContent = "Updating…";
+    }
+
+    try {
+      const payload = await requestJson(socialConfig.followPath || "/ios/follows", {
+        method: wasFollowing ? "DELETE" : "POST",
+        headers: { "Content-Type": "application/json" },
+        retryForbidden: false,
+        body: JSON.stringify({ followerUserId: Number(viewerId), followedUserId: Number(targetUserId) })
+      });
+      if (profileState !== state || sessionGeneration !== generation || !currentUser || String(currentUser.id) !== String(viewerId)) {
+        return;
+      }
+      state.following = payload && typeof payload.following === "boolean" ? payload.following : !wasFollowing;
+      if (state.counts) {
+        const currentCount = getFollowCount(state.counts, ["followerCount", "followersCount", "followers"]);
+        const followDelta = Number(state.following) - Number(wasFollowing);
+        state.counts = { ...state.counts, followerCount: Math.max(0, currentCount + followDelta) };
+      }
+      const cachedListChanged = (
+        connectionsState.userId === String(targetUserId) && connectionsState.type === "followers"
+      ) || (
+        connectionsState.userId === String(viewerId) && connectionsState.type === "following"
+      );
+      if (cachedListChanged) {
+        connectionsState = createConnectionsState(connectionsState.userId, connectionsState.type);
+      }
+      showToast(state.following ? `Following @${state.user.username}.` : `Unfollowed @${state.user.username}.`);
+    } catch (error) {
+      showToast(error.message || "Unable to update this follow right now.");
+    } finally {
+      if (profileState === state) {
+        state.followPending = false;
+        if (getRoute() === routes.profile) {
+          renderProfile();
+          window.requestAnimationFrame(function () {
+            const nextButton = document.getElementById("followProfile");
+            if (nextButton) {
+              nextButton.focus({ preventScroll: true });
+            }
+          });
+        }
+      }
+    }
+  }
+
+  function renderConnectionRow(user) {
+    return `
+      <a class="user-result" href="${escapeHtml(getProfileRoute(user.id))}">
+        ${avatarMarkup(user, user.username, "user-result-avatar")}
+        <span><strong>${escapeHtml(user.username || "Voxxly user")}</strong><small>@${escapeHtml(user.username || "user")}</small></span>
+        <span class="result-arrow" aria-hidden="true">→</span>
+      </a>
+    `;
+  }
+
+  function renderConnections() {
+    const state = connectionsState;
+    const ownerName = (state.owner && state.owner.username) || "profile";
+    const label = state.type === "following" ? "Following" : "Followers";
+    let content = "";
+    if (state.loading && !state.loaded) {
+      content = `<div class="search-loading" role="status">Loading ${label.toLowerCase()}…</div>`;
+    } else if (state.error) {
+      content = `
+        <div class="panel error-state">
+          <div class="stack-tight">
+            <h2>We couldn’t load this list.</h2>
+            <p class="muted">${escapeHtml(state.error)}</p>
+            <div class="actions" style="justify-content:center"><button id="retryConnections" class="primary-button" type="button">Try again</button></div>
+          </div>
+        </div>
+      `;
+    } else if (state.items.length) {
+      content = `<div class="user-results">${state.items.map(renderConnectionRow).join("")}</div>`;
+    } else if (state.loaded) {
+      content = `<div class="panel empty-state"><div><h2>No ${label.toLowerCase()} yet.</h2><p class="muted">This list will update as connections are made.</p></div></div>`;
+    }
+
+    app.innerHTML = `
+      <section class="page-wrap connections-page" aria-labelledby="connectionsTitle">
+        <a class="back-link" href="${escapeHtml(getProfileRoute(state.userId))}">← Back to @${escapeHtml(ownerName)}</a>
+        <header class="page-header">
+          <h1 id="connectionsTitle" class="page-title">${label}</h1>
+          <p class="page-description">@${escapeHtml(ownerName)}</p>
+        </header>
+        ${content}
+      </section>
+    `;
+
+    const retryButton = document.getElementById("retryConnections");
+    if (retryButton) {
+      retryButton.addEventListener("click", function () {
+        state.error = "";
+        loadConnections();
+      });
+    }
+
+    if (!state.loaded && !state.loading && !state.error) {
+      window.queueMicrotask(loadConnections);
+    }
+  }
+
+  async function loadConnections() {
+    if (!currentUser || connectionsState.loading || !connectionsState.userId) {
+      return;
+    }
+    const state = connectionsState;
+    const generation = sessionGeneration;
+    const viewerId = currentUser.id;
+    const userId = state.userId;
+    const isCurrentRequest = function () {
+      return connectionsState === state && sessionGeneration === generation && currentUser && String(currentUser.id) === String(viewerId);
+    };
+    state.loading = true;
+    state.error = "";
+    renderConnections();
+
+    const userPath = fillPathTemplate(profileConfig.userPathTemplate || "/ios/users/{userId}", { userId: userId });
+    const listTemplate = state.type === "following"
+      ? (profileConfig.followingPathTemplate || "/ios/users/{userId}/following")
+      : (profileConfig.followersPathTemplate || "/ios/users/{userId}/followers");
+    const listPath = fillPathTemplate(listTemplate, { userId: userId });
+
+    try {
+      const results = await Promise.all([
+        String(userId) === String(viewerId) ? Promise.resolve(currentUser) : requestJson(userPath),
+        requestJson(listPath)
+      ]);
+      if (!isCurrentRequest()) {
+        return;
+      }
+      if (!Array.isArray(results[1])) {
+        throw new ApiError("This connection list returned an unexpected response.", 500, results[1]);
+      }
+      state.owner = { id: results[0].id, username: results[0].username, profilePhotoUrl: results[0].profilePhotoUrl };
+      state.items = results[1].map(function (user) {
+        return { id: user.id, username: user.username, profilePhotoUrl: user.profilePhotoUrl };
+      });
+      state.loaded = true;
+    } catch (error) {
+      if (isCurrentRequest()) {
+        state.error = error.message || "Unable to load this connection list.";
+      }
+    } finally {
+      state.loading = false;
+      if (isCurrentRequest() && getRoute() === routes.connections) {
+        renderConnections();
       }
     }
   }
@@ -1981,6 +2659,23 @@
       }
     }
 
+    if (route === routes.profile && currentUser) {
+      const targetUserId = getHashQueryParam("userId") || String(currentUser.id);
+      const targetTab = getHashQueryParam("tab") === "reposts" ? "reposts" : "posts";
+      if (profileState.userId !== String(targetUserId)) {
+        profileState = createProfileState(targetUserId);
+      }
+      profileState.activeTab = targetTab;
+    }
+
+    if (route === routes.connections && currentUser) {
+      const targetUserId = getHashQueryParam("userId") || String(currentUser.id);
+      const listType = getHashQueryParam("type") === "following" ? "following" : "followers";
+      if (connectionsState.userId !== String(targetUserId) || connectionsState.type !== listType) {
+        connectionsState = createConnectionsState(targetUserId, listType);
+      }
+    }
+
     activeRoute = route;
     syncShell(route);
 
@@ -1991,6 +2686,12 @@
       case routes.feed:
         renderFeed();
         break;
+      case routes.saved:
+        renderSaved();
+        break;
+      case routes.search:
+        renderSearch();
+        break;
       case routes.upload:
         if (!uploadState.host && currentUser) {
           uploadState.host = currentUser.username || "";
@@ -1999,6 +2700,9 @@
         break;
       case routes.profile:
         renderProfile();
+        break;
+      case routes.connections:
+        renderConnections();
         break;
       case routes.login:
       default:

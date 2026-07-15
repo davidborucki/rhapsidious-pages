@@ -38,9 +38,23 @@ window.APP_CONFIG = {
     interactionPath: "/iosclips/interactions",
     batchSize: 10
   },
+  social: {
+    savedPath: "/ios/saved-clips",
+    savedListPathTemplate: "/ios/users/{userId}/saved-clips",
+    repostedPath: "/ios/reposted-clips",
+    repostedListPathTemplate: "/ios/users/{userId}/reposted-clips",
+    followPath: "/ios/follows",
+    followStatePathTemplate: "/ios/users/{viewerId}/follows/{creatorId}"
+  },
+  search: {
+    usersPath: "/ios/users/search"
+  },
   profile: {
     clipsPathTemplate: "/ios/users/{userId}/clips",
+    repostedClipsPathTemplate: "/ios/users/{userId}/reposted-clips",
     followCountsPathTemplate: "/ios/users/{userId}/follow-counts",
+    followersPathTemplate: "/ios/users/{userId}/followers",
+    followingPathTemplate: "/ios/users/{userId}/following",
     userPathTemplate: "/ios/users/{userId}"
   }
 };

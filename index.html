@@ -9,9 +9,9 @@
     />
     <meta name="theme-color" content="#07070d" />
     <title>Voxxly · Soundbites worth hearing</title>
-    <link rel="icon" type="image/png" sizes="192x192" href="./assets/voxxly-logo-192.png?v=20260714-3" />
-    <link rel="apple-touch-icon" href="./assets/voxxly-logo-192.png?v=20260714-3" />
-    <link rel="stylesheet" href="./styles.css?v=20260714-3" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./assets/voxxly-logo-192.png?v=20260714-4" />
+    <link rel="apple-touch-icon" href="./assets/voxxly-logo-192.png?v=20260714-4" />
+    <link rel="stylesheet" href="./styles.css?v=20260714-4" />
   </head>
   <body>
     <header class="site-header">
@@ -23,8 +23,9 @@
 
         <nav id="primaryNav" class="primary-nav hidden" aria-label="Primary navigation">
           <a class="nav-link" data-route="#/feed" href="#/feed">Soundbites</a>
+          <a class="nav-link" data-route="#/saved" href="#/saved">Saved</a>
+          <a class="nav-link" data-route="#/search" href="#/search">Search</a>
           <a class="nav-link" data-route="#/upload" href="#/upload">Upload</a>
-          <a class="nav-link" data-route="#/profile" href="#/profile">Profile</a>
         </nav>
 
         <div class="header-actions">
@@ -32,7 +33,7 @@
             <a class="text-link" href="#/login">Sign in</a>
             <a class="compact-button" href="#/signup">Create account</a>
           </nav>
-          <span id="userPill" class="user-pill hidden"></span>
+          <a id="accountLink" class="account-link hidden" href="#/profile" aria-label="Open your profile"></a>
           <button id="logoutButton" class="icon-button hidden" type="button">Log out</button>
         </div>
       </div>
@@ -41,7 +42,7 @@
     <main id="app" class="app-shell" tabindex="-1"></main>
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
-    <script src="./config.js?v=20260714-3"></script>
-    <script src="./app.js?v=20260714-3"></script>
+    <script src="./config.js?v=20260714-4"></script>
+    <script src="./app.js?v=20260714-4"></script>
   </body>
 </html>

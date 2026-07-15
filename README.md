@@ -1,62 +1,58 @@
-# Rhapsidious Upload Admin
+# Voxxly Web
 
-Small static admin app for `upload.rhapsidious.com`.
+A dependency-free web client for Voxxly. It uses the existing Spring Boot API for accounts, authentication, creator uploads, profile videos, and the personalized Soundbites feed.
 
-## What it does
+## Features
 
-- Requires login first
-- Shows only two primary actions after login
-- Supports single clip upload with title + file
-- Supports multi-clip upload with upload progress
-- Displays clear success and error states
-- Can be deployed as static files or from the included Nginx container
+- Voxxly branding with the supplied logo and Helvetica-first typography
+- Account creation followed by automatic JWT sign-in
+- Access-token refresh and server logout
+- Personalized, continuously loaded Soundbites recommendations
+- Automatic play/pause behavior and recommendation watch/share signals
+- A profile library with playable videos for the signed-in account
+- One unified upload queue for either a single clip or multiple clips
+- Per-clip names, sequential progress, processing status, and clear errors
+- Keyboard-accessible forms, native video controls, visible focus states, and reduced-motion support
 
-## Spring Boot integration
+## Backend integration
 
-Update [`config.js`](/Users/daveborucki/rhapsidious-pages/config.js) to match your backend:
+Update `config.js` when the API origin or contract changes. The current client uses:
 
-- `apiBaseUrl`: Spring Boot API origin
-- `auth.loginPath`: login endpoint
-- `auth.tokenResponseField`: JSON field containing the token
-- `uploads.singlePath`: single clip upload endpoint
-- `uploads.multiPath`: multi-clip upload endpoint
-- `uploads.titleField`, `uploads.singleFileField`, `uploads.multiFileField`: multipart field names expected by your controller
+- `POST /ios/users` — create an account
+- `POST /auth/login` — obtain access and refresh tokens
+- `POST /auth/refresh` — rotate an expired session
+- `POST /auth/logout` — revoke a refresh token
+- `GET /auth/me` — load the signed-in account
+- `POST /iosclips` — upload one clip at a time
+- `GET /processing/status?clipId=...` — follow post-upload processing
+- `GET /iosclips/feed?userId=...&sessionId=...` — load recommendations
+- `POST /iosclips/interactions` — record recommendation signals
+- `GET /ios/users/{userId}/clips` — load profile videos
+- `GET /ios/users/{userId}/follow-counts` — load profile statistics
 
-Default assumptions:
-
-- `POST /api/admin/auth/login`
-- JSON body with `username` and `password`
-- JSON response with `token`
-- `POST /api/admin/clips` accepts multipart `title` + `file`
-- `POST /api/admin/clips/bulk` accepts multipart `files`
-- Bearer token auth
-
-If your backend uses cookies instead of bearer tokens, set:
-
-```js
-auth: {
-  mode: "cookie",
-  withCredentials: true
-}
-```
-
-And enable `uploads.withCredentials`.
+The current backend only authorizes accounts with administrator access to upload clips. New accounts are regular accounts, so they can use Soundbites and Profile immediately but will receive a clear administrator-access message if they attempt an upload. Changing that authorization policy requires a separate backend change.
 
 ## Local run
 
-Open [`index.html`](/Users/daveborucki/rhapsidious-pages/index.html) directly, or serve the directory with any static web server.
-
-## Deploy
-
-### Static hosting
-
-Deploy the files at the repo root to `upload.rhapsidious.com`.
-
-### Docker / Nginx
+Serve the directory so browser routing and API requests use an HTTP origin:
 
 ```bash
-docker build -t rhapsidious-upload-admin .
-docker run -p 8080:80 rhapsidious-upload-admin
+python3 -m http.server 8080 --bind 127.0.0.1
 ```
 
-Point your subdomain to the container or reverse proxy it through your existing Nginx setup.
+Then open `http://127.0.0.1:8080`.
+
+## Container deployment
+
+```bash
+docker build -t voxxly-pages .
+docker run --rm -p 8080:80 voxxly-pages
+```
+
+## Verification
+
+```bash
+node --check app.js
+node --check config.js
+git diff --check
+```

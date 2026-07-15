@@ -9,18 +9,16 @@
     />
     <meta name="theme-color" content="#07070d" />
     <title>Voxxly · Soundbites worth hearing</title>
-    <link rel="icon" type="image/png" sizes="192x192" href="./assets/voxxly-logo-192.png" />
-    <link rel="apple-touch-icon" href="./assets/voxxly-logo-192.png" />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./assets/voxxly-logo-192.png?v=20260714-3" />
+    <link rel="apple-touch-icon" href="./assets/voxxly-logo-192.png?v=20260714-3" />
+    <link rel="stylesheet" href="./styles.css?v=20260714-3" />
   </head>
   <body>
-    <button id="skipLink" class="skip-link" type="button">Skip to content</button>
-
     <header class="site-header">
       <div class="header-inner">
-        <a class="brand" href="#/feed" aria-label="Voxxly home">
+        <a id="brandLink" class="brand" href="#/login" aria-label="Voxxly login">
           <img class="brand-mark" src="./assets/voxxly-logo-192.png" alt="" />
-          <span class="brand-wordmark">Voxxly</span>
+          <span class="brand-wordmark">voxxly</span>
         </a>
 
         <nav id="primaryNav" class="primary-nav hidden" aria-label="Primary navigation">
@@ -31,7 +29,7 @@
 
         <div class="header-actions">
           <nav id="guestNav" class="guest-nav" aria-label="Account navigation">
-            <a class="text-link" href="#/login">Log in</a>
+            <a class="text-link" href="#/login">Sign in</a>
             <a class="compact-button" href="#/signup">Create account</a>
           </nav>
           <span id="userPill" class="user-pill hidden"></span>
@@ -43,7 +41,7 @@
     <main id="app" class="app-shell" tabindex="-1"></main>
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
-    <script src="./config.js"></script>
-    <script src="./app.js"></script>
+    <script src="./config.js?v=20260714-3"></script>
+    <script src="./app.js?v=20260714-3"></script>
   </body>
 </html>

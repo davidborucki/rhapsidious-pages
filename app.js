@@ -2,14 +2,14 @@
   "use strict";
 
   const app = document.getElementById("app");
-  const skipLink = document.getElementById("skipLink");
+  const brandLink = document.getElementById("brandLink");
   const primaryNav = document.getElementById("primaryNav");
   const guestNav = document.getElementById("guestNav");
   const userPill = document.getElementById("userPill");
   const logoutButton = document.getElementById("logoutButton");
   const toastRegion = document.getElementById("toastRegion");
 
-  if (!app || !skipLink || !primaryNav || !guestNav || !userPill || !logoutButton || !toastRegion) {
+  if (!app || !brandLink || !primaryNav || !guestNav || !userPill || !logoutButton || !toastRegion) {
     return;
   }
 
@@ -406,6 +406,8 @@
   function syncShell(route) {
     const isSignedIn = Boolean(currentUser);
     document.documentElement.classList.toggle("feed-route", route === routes.feed);
+    brandLink.href = isSignedIn ? routes.feed : routes.login;
+    brandLink.setAttribute("aria-label", isSignedIn ? "Voxxly Soundbites" : "Voxxly login");
     primaryNav.classList.toggle("hidden", !isSignedIn);
     guestNav.classList.toggle("hidden", isSignedIn);
     userPill.classList.toggle("hidden", !isSignedIn);
@@ -463,8 +465,8 @@
     return `
       <div class="auth-story" aria-hidden="true">
         <img class="auth-logo" src="./assets/voxxly-logo-384.png" alt="" />
-        <h1>Hear the part that <span class="gradient-word">matters.</span></h1>
-        <p>Voxxly turns standout podcast moments into a soundbite feed shaped around what keeps you listening.</p>
+        <h1>Find the moment worth <span class="gradient-word">hearing.</span></h1>
+        <p>Standout podcast clips, shaped into a personal feed that learns what keeps you listening.</p>
       </div>
     `;
   }
@@ -480,7 +482,7 @@
             <div>
               <p class="eyebrow">Welcome back</p>
               <h1 id="loginTitle" class="auth-title">Log in to Voxxly</h1>
-              <p class="auth-subtitle">Pick up your recommendations and creator tools.</p>
+              <p class="auth-subtitle">Continue to your personalized Soundbites.</p>
             </div>
             ${renderStatus(notice, "loginStatus")}
             <form id="loginForm" class="stack" novalidate>
@@ -492,9 +494,12 @@
                 <label for="password">Password</label>
                 <input id="password" name="password" type="password" autocomplete="current-password" required />
               </div>
-              <button id="loginSubmit" class="primary-button" type="submit">Log in</button>
+              <button id="loginSubmit" class="primary-button auth-submit" type="submit">Log in</button>
             </form>
-            <p class="auth-switch">New here? <a href="#/signup">Create your account</a></p>
+            <div class="auth-switch">
+              <span>Don’t have an account?</span>
+              <a href="#/signup">Create one</a>
+            </div>
           </div>
         </div>
       </section>
@@ -2027,9 +2032,6 @@
     navigate(routes.login);
   }
 
-  skipLink.addEventListener("click", function () {
-    app.focus();
-  });
   logoutButton.addEventListener("click", handleLogout);
   window.addEventListener("hashchange", render);
   document.addEventListener("visibilitychange", function () {

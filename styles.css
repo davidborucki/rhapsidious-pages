@@ -1229,14 +1229,6 @@ a.profile-stat:hover {
   font-size: 0.8rem;
 }
 
-.collection-actions {
-  margin-top: 14px;
-}
-
-.collection-actions .social-action {
-  width: 100%;
-}
-
 .search-page,
 .connections-page {
   max-width: 900px;

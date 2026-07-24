@@ -9,8 +9,8 @@ A dependency-free web client for Voxxly. It uses the existing Spring Boot API fo
 - Access-token refresh and server logout
 - Personalized, continuously loaded Soundbites recommendations
 - Automatic play/pause behavior with recommendation watch, save, and repost signals
-- Saved Soundbites with persistent save and remove controls
-- Profile search with public posts, reposts, follow controls, and follower/following lists
+- Saved Soundbites in a dedicated playback library
+- Live username search with public posts, reposts, follow controls, and follower/following lists
 - A profile library with playable posts and a separate reposts view
 - One unified upload queue for either a single clip or multiple clips
 - Per-clip names, sequential progress, processing status, and clear errors

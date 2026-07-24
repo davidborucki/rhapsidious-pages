@@ -130,6 +130,7 @@
   let profileState = createProfileState();
   let socialState = createSocialState();
   let searchState = createSearchState();
+  let searchDebounceTimer = null;
   let connectionsState = createConnectionsState();
   let uploadState = {
     items: [],
@@ -922,7 +923,6 @@
           <div>
             <h1 id="feedTitle" class="page-title">Soundbites</h1>
           </div>
-          <button id="refreshFeed" class="secondary-button" type="button">Refresh my mix</button>
         </div>
         ${content}
         ${hasItems ? `<div id="feedInlineStatus" class="${feedState.error ? "status status-error" : "hidden"}" role="alert" style="margin-top:18px">${escapeHtml(feedState.error)}</div>` : ""}
@@ -936,10 +936,6 @@
       </section>
     `;
 
-    const refreshButton = document.getElementById("refreshFeed");
-    if (refreshButton) {
-      refreshButton.addEventListener("click", resetFeed);
-    }
     const retryButton = document.getElementById("retryFeed");
     if (retryButton) {
       retryButton.addEventListener("click", function () {
@@ -1354,12 +1350,6 @@
         renderFeed();
       }
     }
-  }
-
-  function resetFeed() {
-    feedState = createFeedState();
-    feedWatchRecords = new Map();
-    renderFeed();
   }
 
   function getWatchRecord(clipId) {
@@ -2076,7 +2066,6 @@
         <div class="profile-clip-copy">
           <a class="clip-creator-link" href="${escapeHtml(getProfileRoute(clip.iosUserId))}">@${escapeHtml(creatorName)}</a>
           <h3 title="${escapeHtml(clip.name || "Untitled soundbite")}">${escapeHtml(clip.name || "Untitled soundbite")}</h3>
-          <div class="collection-actions">${renderSocialButton("save", clip.id)}</div>
         </div>
       </article>
     `;
@@ -2117,22 +2106,11 @@
             <h1 id="savedTitle" class="page-title">Saved</h1>
             <p class="page-description">The clips you want to come back to.</p>
           </div>
-          <button id="refreshSaved" class="secondary-button" type="button" ${socialState.loading ? "disabled" : ""}>Refresh</button>
         </div>
         ${content}
       </section>
     `;
 
-    bindFeedItemActions();
-    const refreshButton = document.getElementById("refreshSaved");
-    if (refreshButton) {
-      refreshButton.addEventListener("click", function () {
-        socialState.loaded = false;
-        socialState.error = "";
-        renderSaved();
-        loadSocialCollections();
-      });
-    }
     const retryButton = document.getElementById("retrySaved");
     if (retryButton) {
       retryButton.addEventListener("click", function () {
@@ -2155,7 +2133,7 @@
     `;
   }
 
-  function renderSearch() {
+  function getSearchResultsMarkup() {
     let results = "";
     if (searchState.loading) {
       results = `<div class="search-loading" role="status">Searching profiles…</div>`;
@@ -2168,7 +2146,21 @@
     } else {
       results = `<div class="search-prompt"><p>Search by username to find people and explore their posts and reposts.</p></div>`;
     }
+    return results;
+  }
 
+  function updateSearchResults() {
+    const results = document.querySelector(".search-results");
+    if (results) {
+      results.innerHTML = getSearchResultsMarkup();
+    }
+    const submitButton = document.querySelector("#profileSearchForm button[type='submit']");
+    if (submitButton) {
+      submitButton.disabled = searchState.loading;
+    }
+  }
+
+  function renderSearch() {
     app.innerHTML = `
       <section class="page-wrap search-page" aria-labelledby="searchTitle">
         <header class="page-header">
@@ -2180,26 +2172,68 @@
           <input id="profileSearchInput" name="query" type="search" autocomplete="off" value="${escapeHtml(searchState.query)}" placeholder="Search @username" maxlength="33" required />
           <button class="primary-button" type="submit" ${searchState.loading ? "disabled" : ""}>Search</button>
         </form>
-        <div class="search-results" aria-live="polite">${results}</div>
+        <div class="search-results" aria-live="polite">${getSearchResultsMarkup()}</div>
       </section>
     `;
 
     document.getElementById("profileSearchForm").addEventListener("submit", handleProfileSearch);
+    document.getElementById("profileSearchInput").addEventListener("input", handleProfileSearchInput);
   }
 
-  async function handleProfileSearch(event) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const query = String(form.elements.query.value || "").trim().replace(/^@+/, "");
+  function normalizeProfileSearchQuery(value) {
+    return String(value || "").trim().replace(/^@+/, "");
+  }
+
+  function validateProfileSearchQuery(query) {
     if (!query || query.length > 32 || !/^[A-Za-z0-9._-]+$/.test(query)) {
-      searchState.query = query;
-      searchState.results = [];
-      searchState.searched = true;
-      searchState.error = "Use 1–32 letters, numbers, periods, underscores, or dashes.";
-      renderSearch();
+      return query ? "Use 1–32 letters, numbers, periods, underscores, or dashes." : "";
+    }
+    return "";
+  }
+
+  function handleProfileSearchInput(event) {
+    window.clearTimeout(searchDebounceTimer);
+    const query = normalizeProfileSearchQuery(event.currentTarget.value);
+    const validationError = validateProfileSearchQuery(query);
+
+    searchState.requestId += 1;
+    searchState.query = query;
+    searchState.results = [];
+    searchState.loading = Boolean(query && !validationError);
+    searchState.searched = Boolean(query);
+    searchState.error = validationError;
+    updateSearchResults();
+
+    if (!query || validationError) {
       return;
     }
 
+    searchDebounceTimer = window.setTimeout(function () {
+      searchProfiles(query);
+    }, 250);
+  }
+
+  function handleProfileSearch(event) {
+    event.preventDefault();
+    window.clearTimeout(searchDebounceTimer);
+    const query = normalizeProfileSearchQuery(event.currentTarget.elements.query.value);
+    const validationError = validateProfileSearchQuery(query);
+
+    if (!query || validationError) {
+      searchState.requestId += 1;
+      searchState.query = query;
+      searchState.results = [];
+      searchState.loading = false;
+      searchState.searched = Boolean(query);
+      searchState.error = validationError;
+      updateSearchResults();
+      return;
+    }
+
+    searchProfiles(query);
+  }
+
+  async function searchProfiles(query) {
     const state = searchState;
     const generation = sessionGeneration;
     const userId = currentUser && currentUser.id;
@@ -2209,7 +2243,7 @@
     state.loading = true;
     state.searched = true;
     state.error = "";
-    renderSearch();
+    updateSearchResults();
 
     try {
       const url = new URL(getApiUrl(searchConfig.usersPath || "/ios/users/search"));
@@ -2221,7 +2255,9 @@
       if (!Array.isArray(payload)) {
         throw new ApiError("Profile search returned an unexpected response.", 500, payload);
       }
-      state.results = payload.map(function (user) {
+      state.results = payload.filter(function (user) {
+        return user && user.id != null && typeof user.username === "string" && user.username.length > 0;
+      }).map(function (user) {
         return { id: user.id, username: user.username, profilePhotoUrl: user.profilePhotoUrl };
       });
     } catch (error) {
@@ -2233,11 +2269,7 @@
       if (searchState === state && state.requestId === requestId) {
         state.loading = false;
         if (getRoute() === routes.search) {
-          renderSearch();
-          const input = document.getElementById("profileSearchInput");
-          if (input) {
-            input.focus();
-          }
+          updateSearchResults();
         }
       }
     }
@@ -2327,7 +2359,6 @@
           <div class="stack-tight">
             <h2>${escapeHtml(emptyTitle)}</h2>
             <p class="muted">${escapeHtml(emptyCopy)}</p>
-            ${isOwnProfile && state.activeTab === "posts" ? `<div class="actions" style="justify-content:center"><a class="primary-button" href="#/upload">Upload clips</a></div>` : ""}
           </div>
         </div>
       `;
@@ -2359,25 +2390,12 @@
               <a class="profile-tab${state.activeTab === "reposts" ? " is-active" : ""}" href="${escapeHtml(getProfileRoute(targetUserId, "reposts"))}" ${state.activeTab === "reposts" ? 'aria-current="page"' : ""}>Reposts <span>${formatCount(state.reposts.length)}</span></a>
             </nav>
             <h2 id="profileClipsTitle" class="sr-only">${state.activeTab === "reposts" ? "Reposted clips" : "Posted clips"}</h2>
-            <div class="actions">
-              <button id="refreshProfile" class="secondary-button" type="button" ${state.loading ? "disabled" : ""}>Refresh</button>
-              ${isOwnProfile ? `<a class="primary-button" href="#/upload">Upload clips</a>` : ""}
-            </div>
           </div>
           ${clipsMarkup}
         </section>
       </section>
     `;
 
-    const refreshButton = document.getElementById("refreshProfile");
-    if (refreshButton) {
-      refreshButton.addEventListener("click", function () {
-        state.loaded = false;
-        state.error = "";
-        renderProfile();
-        loadProfile();
-      });
-    }
     const retryButton = document.getElementById("retryProfile");
     if (retryButton) {
       retryButton.addEventListener("click", function () {
@@ -2646,6 +2664,12 @@
 
     if (activeRoute === routes.feed && route !== routes.feed) {
       cleanupFeedObservers(true);
+    }
+
+    if (activeRoute === routes.search && route !== routes.search) {
+      window.clearTimeout(searchDebounceTimer);
+      searchState.requestId += 1;
+      searchState.loading = false;
     }
 
     if (route === routes.feed) {

@@ -822,7 +822,7 @@
     return `<button class="social-action${active ? " is-active" : ""}" type="button" data-${dataName}="${escapeHtml(clipId)}" aria-pressed="${active}" ${statePending ? 'aria-busy="true"' : ""} ${pending ? "disabled" : ""}><span class="social-action-symbol" aria-hidden="true">${isSave ? "＋" : "↻"}</span><span data-social-label>${label}</span></button>`;
   }
 
-  function renderFeedItem(item, index) {
+  function renderFeedItem(item) {
     const creator = creatorCache.get(String(item.iosUserId)) || null;
     const creatorName = (creator && creator.username) || item.creatorName || "Voxxly creator";
     const streamUrl = getSafeMediaUrl(item.streamUrl, `/iosclips/${item.id}/stream`);
@@ -853,10 +853,9 @@
             ${posterUrl ? `poster="${escapeHtml(posterUrl)}"` : ""}
             aria-label="Play ${escapeHtml(item.name || "soundbite")}">
           </video>
-          <div class="soundbite-labels">
-            <span class="badge">For you · ${index + 1}</span>
-            ${item.isMature || item.mature ? `<span class="badge badge-warning">Mature${item.minimumAge ? ` · ${escapeHtml(item.minimumAge)}+` : ""}</span>` : ""}
-          </div>
+          ${item.isMature || item.mature
+            ? `<div class="soundbite-labels"><span class="badge badge-warning">Mature${item.minimumAge ? ` · ${escapeHtml(item.minimumAge)}+` : ""}</span></div>`
+            : ""}
         </div>
         <div class="soundbite-details">
           <div>
@@ -864,7 +863,6 @@
               ${avatarMarkup(creator, creatorName)}
               <div>
                 <p class="creator-name">@${escapeHtml(creatorName)}</p>
-                <p class="creator-meta">Recommended for you</p>
               </div>
             </a>
             <h2 id="clipTitle-${escapeHtml(item.id)}" class="soundbite-title">${escapeHtml(item.name || "Untitled soundbite")}</h2>
@@ -1306,7 +1304,6 @@
         throw new ApiError("The Soundbites feed returned an unexpected response.", 500, payload);
       }
 
-      const previousCount = state.items.length;
       const knownIds = new Set(state.items.map(function (item) { return String(item.id); }));
       const newItems = sharedItems.concat(payload).filter(function (item) {
         const id = String(item && item.id);
@@ -1328,9 +1325,7 @@
       if (hadItems && getRoute() === routes.feed) {
         const feedList = document.getElementById("feedList");
         if (feedList && newItems.length) {
-          feedList.insertAdjacentHTML("beforeend", newItems.map(function (item, index) {
-            return renderFeedItem(item, previousCount + index);
-          }).join(""));
+          feedList.insertAdjacentHTML("beforeend", newItems.map(renderFeedItem).join(""));
           bindFeedItemActions();
           bindFeedPlayers();
         }

@@ -782,12 +782,6 @@ h1[tabindex="-1"]:focus {
   font-weight: 700;
 }
 
-.creator-meta {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
 .soundbite-title {
   margin: 28px 0 0;
   overflow-wrap: anywhere;

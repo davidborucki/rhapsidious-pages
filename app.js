@@ -65,6 +65,7 @@
       fallbackAttempted: false,
       sharedClipId: sharedClipId || getHashQueryParam("clip"),
       sharedClipLoaded: false,
+      likedIds: new Set(),
       error: "",
       sessionId: randomId("soundbites")
     };
@@ -819,7 +820,14 @@
     const pending = actionPending || statePending;
     const label = isSave ? (active ? "Saved" : "Save") : (active ? "Reposted" : "Repost");
     const dataName = isSave ? "save-clip" : "repost-clip";
-    return `<button class="social-action${active ? " is-active" : ""}" type="button" data-${dataName}="${escapeHtml(clipId)}" aria-pressed="${active}" ${statePending ? 'aria-busy="true"' : ""} ${pending ? "disabled" : ""}><span class="social-action-symbol" aria-hidden="true">${isSave ? "＋" : "↻"}</span><span data-social-label>${label}</span></button>`;
+    const iconName = isSave ? "bookmark" : "repeat-2";
+    return `<button class="social-action${active ? " is-active" : ""}" type="button" data-${dataName}="${escapeHtml(clipId)}" aria-label="${label} clip" aria-pressed="${active}" ${statePending ? 'aria-busy="true"' : ""} ${pending ? "disabled" : ""}><span class="feed-action-icon feed-action-icon-${iconName}" aria-hidden="true"></span><span data-social-label>${label}</span></button>`;
+  }
+
+  function renderLikeButton(clipId) {
+    const active = feedState.likedIds.has(String(clipId));
+    const label = active ? "Liked" : "Like";
+    return `<button class="social-action${active ? " is-active" : ""}" type="button" data-like-clip="${escapeHtml(clipId)}" aria-label="${label} clip" aria-pressed="${active}"><span class="feed-action-icon feed-action-icon-heart" aria-hidden="true"></span><span data-like-label>${label}</span></button>`;
   }
 
   function renderFeedItem(item) {
@@ -829,14 +837,7 @@
     const posterUrl = getSafeMediaUrl(item.thumbnailUrl);
     const fullEpisodeUrl = getSafeMediaUrl(item.fullEpisodeFilepath);
     const sourceUrl = getSafeMediaUrl(item.sourceUrl);
-    const detailBits = [];
-
-    if (item.fullEpisodeName) {
-      detailBits.push(item.fullEpisodeName);
-    }
-    if (item.sourcePlatform) {
-      detailBits.push(item.sourcePlatform);
-    }
+    const episodeUrl = fullEpisodeUrl || sourceUrl;
     const creatorRoute = getProfileRoute(item.iosUserId);
 
     return `
@@ -856,27 +857,21 @@
           ${item.isMature || item.mature
             ? `<div class="soundbite-labels"><span class="badge badge-warning">Mature${item.minimumAge ? ` · ${escapeHtml(item.minimumAge)}+` : ""}</span></div>`
             : ""}
-        </div>
-        <div class="soundbite-details">
-          <div>
-            <a class="creator-row creator-link" href="${escapeHtml(creatorRoute)}" aria-label="View @${escapeHtml(creatorName)} profile">
-              ${avatarMarkup(creator, creatorName)}
-              <div>
-                <p class="creator-name">@${escapeHtml(creatorName)}</p>
-              </div>
+          <div class="feed-video-copy">
+            <a class="feed-overlay-creator" href="${escapeHtml(creatorRoute)}" aria-label="View @${escapeHtml(creatorName)} profile">@${escapeHtml(creatorName)}</a>
+            <h2 id="clipTitle-${escapeHtml(item.id)}" class="feed-overlay-title">${escapeHtml(item.name || "Untitled soundbite")}</h2>
+            ${episodeUrl
+              ? `<a class="feed-full-episode" data-full-episode="${escapeHtml(item.id)}" href="${escapeHtml(episodeUrl)}" target="_blank" rel="noreferrer">Full episode</a>`
+              : ""}
+          </div>
+          <aside class="feed-action-rail" aria-label="Soundbite actions">
+            <a class="feed-avatar-link" href="${escapeHtml(creatorRoute)}" aria-label="View @${escapeHtml(creatorName)} profile">
+              ${avatarMarkup(creator, creatorName, "feed-creator-avatar")}
             </a>
-            <h2 id="clipTitle-${escapeHtml(item.id)}" class="soundbite-title">${escapeHtml(item.name || "Untitled soundbite")}</h2>
-            ${detailBits.length ? `<p class="soundbite-copy">${escapeHtml(detailBits.join(" · "))}</p>` : ""}
-          </div>
-          <div class="soundbite-actions">
-            <div class="social-action-row" aria-label="Soundbite actions">
-              ${renderSocialButton("save", item.id)}
-              ${renderSocialButton("repost", item.id)}
-            </div>
-            ${fullEpisodeUrl
-              ? `<a class="quiet-button" data-full-episode="${escapeHtml(item.id)}" href="${escapeHtml(fullEpisodeUrl)}" target="_blank" rel="noreferrer">Open full episode</a>`
-              : (sourceUrl ? `<a class="quiet-button" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer">Open source</a>` : "")}
-          </div>
+            ${renderLikeButton(item.id)}
+            ${renderSocialButton("save", item.id)}
+            ${renderSocialButton("repost", item.id)}
+          </aside>
         </div>
       </article>
     `;
@@ -967,6 +962,13 @@
   }
 
   function bindFeedItemActions() {
+    app.querySelectorAll("[data-like-clip]").forEach(function (button) {
+      if (button.dataset.actionBound === "true") {
+        return;
+      }
+      button.dataset.actionBound = "true";
+      button.addEventListener("click", handleLikeToggle);
+    });
     app.querySelectorAll("[data-save-clip]").forEach(function (button) {
       if (button.dataset.actionBound === "true") {
         return;
@@ -998,6 +1000,31 @@
     });
   }
 
+  function handleLikeToggle(event) {
+    const button = event.currentTarget;
+    const clipId = String(button.getAttribute("data-like-clip") || "");
+    if (!currentUser || !clipId) {
+      return;
+    }
+
+    const wasLiked = feedState.likedIds.has(clipId);
+    if (wasLiked) {
+      feedState.likedIds.delete(clipId);
+    } else {
+      feedState.likedIds.add(clipId);
+      const record = getWatchRecord(clipId);
+      reportInteraction(clipId, record.watchedSec, { hasLiked: true });
+    }
+
+    button.classList.toggle("is-active", !wasLiked);
+    button.setAttribute("aria-pressed", String(!wasLiked));
+    button.setAttribute("aria-label", `${wasLiked ? "Like" : "Liked"} clip`);
+    const label = button.querySelector("[data-like-label]");
+    if (label) {
+      label.textContent = wasLiked ? "Like" : "Liked";
+    }
+  }
+
   function updateSocialActionButtons(clipId) {
     const selector = clipId
       ? `[data-save-clip="${String(clipId)}"], [data-repost-clip="${String(clipId)}"]`
@@ -1019,7 +1046,9 @@
       }
       const label = button.querySelector("[data-social-label]");
       if (label) {
-        label.textContent = isSave ? (active ? "Saved" : "Save") : (active ? "Reposted" : "Repost");
+        const nextLabel = isSave ? (active ? "Saved" : "Save") : (active ? "Reposted" : "Repost");
+        label.textContent = nextLabel;
+        button.setAttribute("aria-label", `${nextLabel} clip`);
       }
     });
   }

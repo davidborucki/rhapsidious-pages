@@ -1191,9 +1191,6 @@
         profileState.reposts = state.repostedClips.slice();
         profileState.repostsVersion += 1;
       }
-      showToast(isSave
-        ? (wasActive ? "Removed from Saved." : "Saved to your collection.")
-        : (wasActive ? "Repost removed." : "Reposted to your profile."));
     } catch (error) {
       showToast(error.message || `Unable to ${isSave ? "save" : "repost"} this clip.`);
     } finally {

@@ -655,9 +655,9 @@ h1[tabindex="-1"]:focus {
 }
 
 .soundbite-card {
-  width: min(100%, 860px);
-  min-height: min(760px, calc(100vh - 132px));
+  width: min(100%, 390px);
   margin: 0 auto;
+  aspect-ratio: 9 / 16;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
@@ -673,7 +673,9 @@ h1[tabindex="-1"]:focus {
 
 .soundbite-media {
   position: relative;
-  height: clamp(560px, calc(100vh - 132px), 760px);
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 9 / 16;
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -693,9 +695,11 @@ h1[tabindex="-1"]:focus {
 }
 
 .soundbite-video {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
+  object-position: center;
   background: #000;
 }
 
@@ -857,8 +861,16 @@ h1[tabindex="-1"]:focus {
   transform: translateY(-1px);
 }
 
-.social-action.is-active {
-  color: var(--orange-bright);
+.social-action[data-like-clip].is-active {
+  color: #ff453a;
+}
+
+.social-action[data-save-clip].is-active {
+  color: #f47604;
+}
+
+.social-action[data-repost-clip].is-active {
+  color: #ffc107;
 }
 
 .feed-action-icon {
@@ -888,6 +900,16 @@ h1[tabindex="-1"]:focus {
 .feed-action-icon-repeat-2 {
   -webkit-mask-image: url("./assets/repeat-2.svg");
   mask-image: url("./assets/repeat-2.svg");
+}
+
+.social-action.is-active .feed-action-icon-heart {
+  -webkit-mask-image: url("./assets/heart-filled.svg");
+  mask-image: url("./assets/heart-filled.svg");
+}
+
+.social-action.is-active .feed-action-icon-bookmark {
+  -webkit-mask-image: url("./assets/bookmark-filled.svg");
+  mask-image: url("./assets/bookmark-filled.svg");
 }
 
 .feed-loader,
@@ -1579,15 +1601,6 @@ a.profile-stat:hover {
     flex-direction: column;
   }
 
-  .soundbite-card {
-    min-height: auto;
-  }
-
-  .soundbite-media {
-    height: min(72vh, 720px);
-    min-height: 520px;
-  }
-
   .feed-video-copy {
     right: 88px;
     bottom: 68px;
@@ -1650,11 +1663,6 @@ a.profile-stat:hover {
   .upload-settings,
   .upload-queue-panel {
     padding: 20px;
-  }
-
-  .soundbite-media {
-    height: min(70vh, 660px);
-    min-height: 500px;
   }
 
   .feed-video-copy {

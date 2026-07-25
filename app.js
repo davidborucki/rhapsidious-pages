@@ -4,12 +4,15 @@
   const app = document.getElementById("app");
   const brandLink = document.getElementById("brandLink");
   const primaryNav = document.getElementById("primaryNav");
+  const searchNavLink = document.getElementById("searchNavLink");
+  const searchDrawer = document.getElementById("searchDrawer");
+  const searchDrawerContent = document.getElementById("searchDrawerContent");
   const guestNav = document.getElementById("guestNav");
   const accountLink = document.getElementById("accountLink");
   const logoutButton = document.getElementById("logoutButton");
   const toastRegion = document.getElementById("toastRegion");
 
-  if (!app || !brandLink || !primaryNav || !guestNav || !accountLink || !logoutButton || !toastRegion) {
+  if (!app || !brandLink || !primaryNav || !searchNavLink || !searchDrawer || !searchDrawerContent || !guestNav || !accountLink || !logoutButton || !toastRegion) {
     return;
   }
 
@@ -136,6 +139,7 @@
   let socialState = createSocialState();
   let searchState = createSearchState();
   let searchDebounceTimer = null;
+  let searchDrawerOpen = false;
   let connectionsState = createConnectionsState();
   let uploadState = {
     items: [],
@@ -493,12 +497,14 @@
     }
 
     primaryNav.querySelectorAll("[data-route]").forEach(function (link) {
-      if (link.getAttribute("data-route") === route) {
+      const linkRoute = link.getAttribute("data-route");
+      if ((searchDrawerOpen && linkRoute === routes.search) || (!searchDrawerOpen && linkRoute === route)) {
         link.setAttribute("aria-current", "page");
       } else {
         link.removeAttribute("aria-current");
       }
     });
+    searchNavLink.setAttribute("aria-expanded", String(searchDrawerOpen));
   }
 
   function focusPageHeading() {
@@ -514,6 +520,10 @@
 
   function resetUserData() {
     sessionGeneration += 1;
+    searchDrawerOpen = false;
+    searchDrawer.classList.remove("is-open");
+    searchDrawer.setAttribute("aria-hidden", "true");
+    searchDrawer.inert = true;
     feedAudioEnabled = true;
     feedState = createFeedState(getHashQueryParam("clip", pendingProtectedHash || window.location.hash));
     profileState = createProfileState();
@@ -1532,6 +1542,9 @@
     let touchStartTime = 0;
 
     const handleWheel = function (event) {
+      if (event.target.closest && event.target.closest(".search-drawer")) {
+        return;
+      }
       if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
         return;
       }
@@ -1572,6 +1585,9 @@
       }
     };
     const handleKeydown = function (event) {
+      if (searchDrawerOpen) {
+        return;
+      }
       const target = event.target;
       if (target && target.closest && target.closest("input, textarea, select, button, a, video")) {
         return;
@@ -2335,14 +2351,79 @@
   }
 
   function updateSearchResults() {
-    const results = document.querySelector(".search-results");
-    if (results) {
+    document.querySelectorAll(".search-results").forEach(function (results) {
       results.innerHTML = getSearchResultsMarkup();
-    }
-    const submitButton = document.querySelector("#profileSearchForm button[type='submit']");
-    if (submitButton) {
+    });
+    document.querySelectorAll("#profileSearchForm button[type='submit']").forEach(function (submitButton) {
       submitButton.disabled = searchState.loading;
+    });
+  }
+
+  function renderSearchDrawer(options) {
+    const renderOptions = options || {};
+    searchDrawerContent.innerHTML = `
+      <div class="search-drawer-header">
+        <div>
+          <h2 id="searchDrawerTitle">Search</h2>
+          <p>Find people on Voxxly.</p>
+        </div>
+        <button id="closeSearchDrawer" class="search-drawer-close" type="button" aria-label="Close search">
+          <span class="search-close-icon" aria-hidden="true"></span>
+        </button>
+      </div>
+      <form id="profileSearchForm" class="search-form search-drawer-form" role="search">
+        <label class="sr-only" for="profileSearchInput">Search usernames</label>
+        <input id="profileSearchInput" name="query" type="search" autocomplete="off" value="${escapeHtml(searchState.query)}" placeholder="Search @username" maxlength="33" required />
+        <button class="primary-button" type="submit" ${searchState.loading ? "disabled" : ""}>Search</button>
+      </form>
+      <div class="search-results" aria-live="polite">${getSearchResultsMarkup()}</div>
+    `;
+
+    document.getElementById("closeSearchDrawer").addEventListener("click", closeSearchDrawer);
+    document.getElementById("profileSearchForm").addEventListener("submit", handleProfileSearch);
+    document.getElementById("profileSearchInput").addEventListener("input", handleProfileSearchInput);
+    searchDrawerContent.querySelector(".search-results").addEventListener("click", function (event) {
+      if (event.target.closest(".user-result")) {
+        closeSearchDrawer();
+      }
+    });
+
+    if (renderOptions.focus !== false) {
+      window.requestAnimationFrame(function () {
+        const input = document.getElementById("profileSearchInput");
+        if (input && searchDrawerOpen) {
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+        }
+      });
     }
+  }
+
+  function openSearchDrawer(options) {
+    if (!currentUser) {
+      return;
+    }
+    searchDrawerOpen = true;
+    renderSearchDrawer(options);
+    searchDrawer.inert = false;
+    searchDrawer.setAttribute("aria-hidden", "false");
+    window.requestAnimationFrame(function () {
+      if (searchDrawerOpen) {
+        searchDrawer.classList.add("is-open");
+      }
+    });
+    syncShell(getRoute());
+  }
+
+  function closeSearchDrawer() {
+    if (!searchDrawerOpen) {
+      return;
+    }
+    searchDrawerOpen = false;
+    searchDrawer.classList.remove("is-open");
+    searchDrawer.setAttribute("aria-hidden", "true");
+    searchDrawer.inert = true;
+    syncShell(getRoute());
   }
 
   function renderSearch() {
@@ -2453,7 +2534,7 @@
     } finally {
       if (searchState === state && state.requestId === requestId) {
         state.loading = false;
-        if (getRoute() === routes.search) {
+        if (searchDrawerOpen || getRoute() === routes.search) {
           updateSearchResults();
         }
       }
@@ -2847,6 +2928,12 @@
       return;
     }
 
+    if (currentUser && route === routes.search) {
+      openSearchDrawer();
+      navigate(activeRoute && activeRoute !== routes.search ? activeRoute : routes.feed);
+      return;
+    }
+
     if (activeRoute === routes.feed && route !== routes.feed) {
       cleanupFeedObservers(true);
     }
@@ -2945,6 +3032,24 @@
     navigate(routes.login);
   }
 
+  primaryNav.addEventListener("click", function (event) {
+    const link = event.target.closest("[data-route]");
+    if (!link) {
+      return;
+    }
+    if (link.getAttribute("data-route") === routes.search) {
+      event.preventDefault();
+      openSearchDrawer();
+    } else if (searchDrawerOpen) {
+      closeSearchDrawer();
+    }
+  });
+  window.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && searchDrawerOpen) {
+      closeSearchDrawer();
+      searchNavLink.focus();
+    }
+  });
   logoutButton.addEventListener("click", handleLogout);
   window.addEventListener("hashchange", render);
   document.addEventListener("visibilitychange", function () {

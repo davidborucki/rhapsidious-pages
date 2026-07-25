@@ -257,6 +257,96 @@ input:disabled {
   mask-image: url("./assets/user.svg");
 }
 
+.search-drawer {
+  position: fixed;
+  z-index: 95;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: clamp(360px, 33.333vw, 640px);
+  padding: calc(var(--header-height) + 16px) 24px 24px;
+  overflow-y: auto;
+  visibility: hidden;
+  border-right: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  background: rgba(13, 12, 21, 0.98);
+  box-shadow: 24px 0 70px rgba(0, 0, 0, 0.42);
+  opacity: 0;
+  transform: translate3d(-108%, 0, 0);
+  transition:
+    transform 360ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 220ms ease,
+    visibility 0s linear 360ms;
+  overscroll-behavior: contain;
+  pointer-events: none;
+}
+
+.search-drawer.is-open {
+  visibility: visible;
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  transition-delay: 0s;
+  pointer-events: auto;
+}
+
+.search-drawer-header {
+  margin-bottom: 26px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.search-drawer-header h2 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: -0.045em;
+}
+
+.search-drawer-header p {
+  margin: 7px 0 0;
+  color: var(--muted);
+}
+
+.search-drawer-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: background-color 150ms ease, transform 150ms ease;
+}
+
+.search-drawer-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+.search-close-icon {
+  width: 22px;
+  height: 22px;
+  display: block;
+  background: currentColor;
+  -webkit-mask: url("./assets/x.svg") center / contain no-repeat;
+  mask: url("./assets/x.svg") center / contain no-repeat;
+}
+
+.search-drawer-form {
+  width: 100%;
+}
+
+.search-drawer .search-results {
+  margin-top: 20px;
+}
+
 .header-actions {
   grid-column: 2;
   justify-content: flex-end;
@@ -1672,6 +1762,14 @@ a.profile-stat:hover {
   .primary-nav .nav-icon {
     width: 20px;
     height: 20px;
+  }
+
+  .search-drawer {
+    z-index: 110;
+    left: 0;
+    width: 100%;
+    padding: calc(var(--header-height) + 16px) 18px calc(102px + env(safe-area-inset-bottom, 0px));
+    border-left: 0;
   }
 
   .signed-in .app-shell {

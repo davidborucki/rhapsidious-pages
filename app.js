@@ -843,6 +843,9 @@
 
     return `
       <article class="soundbite-card" data-feed-card data-clip-id="${escapeHtml(item.id)}" aria-labelledby="clipTitle-${escapeHtml(item.id)}">
+        ${posterUrl
+          ? `<img class="feed-ambient-glow" src="${escapeHtml(posterUrl)}" alt="" aria-hidden="true" decoding="async">`
+          : ""}
         <div class="soundbite-media">
           <video
             class="soundbite-video"
@@ -915,11 +918,7 @@
 
     app.innerHTML = `
       <section class="feed-page" aria-labelledby="feedTitle">
-        <div class="feed-heading-row">
-          <div>
-            <h1 id="feedTitle" class="page-title">Soundbytes</h1>
-          </div>
-        </div>
+        <h1 id="feedTitle" class="sr-only">Soundbytes</h1>
         ${content}
         ${hasItems ? `<div id="feedInlineStatus" class="${feedState.error ? "status status-error" : "hidden"}" role="alert" style="margin-top:18px">${escapeHtml(feedState.error)}</div>` : ""}
         ${hasItems ? `
@@ -1158,6 +1157,11 @@
     }
     const wasActive = activeSet.has(clipId);
     pendingSet.add(clipId);
+    if (wasActive) {
+      activeSet.delete(clipId);
+    } else {
+      activeSet.add(clipId);
+    }
     updateSocialActionButtons(clipId);
 
     try {
@@ -1173,7 +1177,6 @@
 
       const collection = isSave ? state.savedClips : state.repostedClips;
       if (wasActive) {
-        activeSet.delete(clipId);
         const filtered = collection.filter(function (clip) { return String(clip.id) !== clipId; });
         if (isSave) {
           state.savedClips = filtered;
@@ -1181,7 +1184,6 @@
           state.repostedClips = filtered;
         }
       } else {
-        activeSet.add(clipId);
         const clip = findKnownClip(clipId);
         if (clip && !collection.some(function (candidate) { return String(candidate.id) === clipId; })) {
           collection.unshift(clip);
@@ -1195,6 +1197,11 @@
         profileState.repostsVersion += 1;
       }
     } catch (error) {
+      if (wasActive) {
+        activeSet.add(clipId);
+      } else {
+        activeSet.delete(clipId);
+      }
       showToast(error.message || `Unable to ${isSave ? "save" : "repost"} this clip.`);
     } finally {
       if (socialState === state) {

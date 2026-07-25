@@ -51,7 +51,7 @@
   let feedNavigationCleanup = null;
   let feedNavigationLocked = false;
   let feedNavigationTimer = null;
-  let feedAudioEnabled = false;
+  let feedAudioEnabled = true;
   let creatorCache = new Map();
   let feedWatchRecords = new Map();
 
@@ -513,7 +513,7 @@
 
   function resetUserData() {
     sessionGeneration += 1;
-    feedAudioEnabled = false;
+    feedAudioEnabled = true;
     feedState = createFeedState(getHashQueryParam("clip", pendingProtectedHash || window.location.hash));
     profileState = createProfileState();
     socialState = createSocialState();
@@ -856,7 +856,7 @@
             data-feed-video
             data-clip-title="${escapeHtml(item.name || "soundbite")}"
             playsinline
-            muted
+            loop
             tabindex="0"
             role="button"
             preload="metadata"
@@ -1415,6 +1415,18 @@
     });
   }
 
+  function enableFeedAudio() {
+    feedAudioEnabled = true;
+    const video = app.querySelector("[data-feed-video]");
+    if (!video || !video.muted) {
+      return;
+    }
+    video.muted = false;
+    if (video.paused) {
+      video.play().catch(function () {});
+    }
+  }
+
   function navigateFeedBy(direction) {
     if (!direction || feedNavigationLocked || !feedState.items.length) {
       return;
@@ -1456,6 +1468,7 @@
         return;
       }
       event.preventDefault();
+      enableFeedAudio();
       wheelDistance += event.deltaY;
       window.clearTimeout(wheelResetTimer);
       wheelResetTimer = window.setTimeout(function () {
@@ -1479,6 +1492,7 @@
       const distance = touchStartY - event.changedTouches[0].clientY;
       touchStartY = null;
       if (Math.abs(distance) >= 48) {
+        enableFeedAudio();
         navigateFeedBy(distance > 0 ? 1 : -1);
       }
     };
@@ -1489,9 +1503,11 @@
       }
       if (event.key === "ArrowDown" || event.key === "PageDown") {
         event.preventDefault();
+        enableFeedAudio();
         navigateFeedBy(1);
       } else if (event.key === "ArrowUp" || event.key === "PageUp") {
         event.preventDefault();
+        enableFeedAudio();
         navigateFeedBy(-1);
       }
     };
@@ -1547,6 +1563,7 @@
       }
 
       video.dataset.feedBound = "true";
+      let previousPlaybackTime = 0;
       const updatePlaybackLabel = function () {
         const title = video.getAttribute("data-clip-title") || "soundbite";
         video.setAttribute("aria-label", video.muted ? `Turn sound on for ${title}` : `${video.paused ? "Play" : "Pause"} ${title}`);
@@ -1590,6 +1607,15 @@
       video.addEventListener("ended", function () {
         stopWatching(clipId, true);
         updatePlaybackLabel();
+      });
+      video.addEventListener("timeupdate", function () {
+        if (previousPlaybackTime > 1 && video.currentTime + 0.5 < previousPlaybackTime) {
+          stopWatching(clipId, false);
+          const record = getWatchRecord(clipId);
+          reportInteraction(clipId, record.watchedSec, { didVideoRepeat: true });
+          startWatching(clipId);
+        }
+        previousPlaybackTime = video.currentTime;
       });
     });
     activateFeedCard(cards[0]);

@@ -50,7 +50,7 @@
   let pendingProtectedHash = "";
   let feedNavigationCleanup = null;
   let feedNavigationLocked = false;
-  let feedNavigationTimer = null;
+  let feedTransitionGeneration = 0;
   let feedAudioEnabled = true;
   let creatorCache = new Map();
   let feedWatchRecords = new Map();
@@ -68,6 +68,7 @@
       sharedClipLoaded: false,
       activeIndex: 0,
       pendingAdvance: false,
+      pendingAdvanceVelocity: 0.5,
       likedIds: new Set(),
       error: "",
       sessionId: randomId("soundbites")
@@ -896,7 +897,7 @@
     let content = "";
     if (hasItems) {
       feedState.activeIndex = Math.max(0, Math.min(feedState.activeIndex, feedState.items.length - 1));
-      content = `<div id="feedList" class="feed-list">${renderFeedItem(feedState.items[feedState.activeIndex])}</div>`;
+      content = `<div id="feedList" class="feed-list"><div class="feed-slide" data-feed-slide>${renderFeedItem(feedState.items[feedState.activeIndex])}</div></div>`;
     } else if (feedState.loading || needsInitialLoad) {
       content = `<div class="skeleton skeleton-card" role="status" aria-label="Loading your recommended Soundbites"></div>`;
     } else if (feedState.error) {
@@ -1247,7 +1248,8 @@
     const generation = sessionGeneration;
     const userId = currentUser.id;
     const hadItems = state.items.length > 0;
-    let advancedToNewItem = false;
+    let advancedToNewItem = -1;
+    let advanceVelocity = state.pendingAdvanceVelocity;
     const isCurrentRequest = function () {
       return feedState === state && sessionGeneration === generation && currentUser && String(currentUser.id) === String(userId);
     };
@@ -1335,13 +1337,14 @@
       state.hasMore = !state.usingFallback && payload.length >= batchSize && newItems.length > 0;
 
       if (state.pendingAdvance && newItems.length) {
-        state.activeIndex = firstNewIndex;
-        advancedToNewItem = true;
+        advancedToNewItem = firstNewIndex;
       }
       state.pendingAdvance = false;
+      state.pendingAdvanceVelocity = 0.5;
     } catch (error) {
       if (isCurrentRequest()) {
         state.pendingAdvance = false;
+        state.pendingAdvanceVelocity = 0.5;
         state.error = error.message || "Unable to load recommendations right now.";
       }
     } finally {
@@ -1350,8 +1353,8 @@
         return;
       }
       if (hadItems) {
-        if (advancedToNewItem) {
-          renderFeed({ reportWatch: true });
+        if (advancedToNewItem >= 0) {
+          transitionFeedToIndex(advancedToNewItem, 1, advanceVelocity);
         } else {
           updateFeedFooter();
         }
@@ -1427,7 +1430,75 @@
     }
   }
 
-  function navigateFeedBy(direction) {
+  function transitionFeedToIndex(nextIndex, direction, velocity) {
+    const feedList = document.getElementById("feedList");
+    const currentSlide = feedList && feedList.querySelector("[data-feed-slide]");
+    const nextItem = feedState.items[nextIndex];
+    if (!feedList || !currentSlide || !nextItem || typeof currentSlide.animate !== "function") {
+      feedState.activeIndex = nextIndex;
+      renderFeed({ reportWatch: true });
+      return;
+    }
+
+    feedNavigationLocked = true;
+    const transitionGeneration = ++feedTransitionGeneration;
+    const incomingSlide = document.createElement("div");
+    incomingSlide.className = "feed-slide";
+    incomingSlide.setAttribute("data-feed-slide", "");
+    incomingSlide.innerHTML = renderFeedItem(nextItem);
+    const incomingStart = direction > 0 ? 100 : -100;
+    const outgoingEnd = direction > 0 ? -100 : 100;
+    incomingSlide.style.transform = `translate3d(0, ${incomingStart}%, 0)`;
+    feedList.appendChild(incomingSlide);
+
+    bindFeedItemActions();
+    const incomingCard = incomingSlide.querySelector("[data-feed-card]");
+    const reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const normalizedVelocity = Math.max(0, Math.min(1, Number(velocity) || 0));
+    const duration = reducedMotion ? 1 : Math.round(560 - normalizedVelocity * 220);
+    const timing = {
+      duration: duration,
+      easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+      fill: "forwards"
+    };
+    bindFeedPlayers(null, false);
+    const activateIncomingTimer = window.setTimeout(function () {
+      if (transitionGeneration === feedTransitionGeneration && getRoute() === routes.feed) {
+        activateFeedCard(incomingCard);
+      }
+    }, Math.min(150, duration * 0.35));
+    const outgoingAnimation = currentSlide.animate([
+      { transform: "translate3d(0, 0, 0)" },
+      { transform: `translate3d(0, ${outgoingEnd}%, 0)` }
+    ], timing);
+    const incomingAnimation = incomingSlide.animate([
+      { transform: `translate3d(0, ${incomingStart}%, 0)` },
+      { transform: "translate3d(0, 0, 0)" }
+    ], timing);
+
+    Promise.all([
+      outgoingAnimation.finished.catch(function () {}),
+      incomingAnimation.finished.catch(function () {})
+    ]).then(function () {
+      if (transitionGeneration !== feedTransitionGeneration || getRoute() !== routes.feed || feedState.items[nextIndex] !== nextItem) {
+        return;
+      }
+
+      window.clearTimeout(activateIncomingTimer);
+      activateFeedCard(incomingCard);
+      feedState.activeIndex = nextIndex;
+      currentSlide.remove();
+      incomingSlide.style.transform = "translate3d(0, 0, 0)";
+      incomingAnimation.cancel();
+      feedNavigationLocked = false;
+
+      if (feedState.hasMore && !feedState.loading && feedState.activeIndex >= feedState.items.length - 2) {
+        window.queueMicrotask(loadMoreFeed);
+      }
+    });
+  }
+
+  function navigateFeedBy(direction, velocity) {
     if (!direction || feedNavigationLocked || !feedState.items.length) {
       return;
     }
@@ -1439,18 +1510,13 @@
     if (nextIndex >= feedState.items.length) {
       if (direction > 0 && feedState.hasMore) {
         feedState.pendingAdvance = true;
+        feedState.pendingAdvanceVelocity = velocity;
         loadMoreFeed();
       }
       return;
     }
 
-    feedState.activeIndex = nextIndex;
-    renderFeed({ reportWatch: true });
-    feedNavigationLocked = true;
-    window.clearTimeout(feedNavigationTimer);
-    feedNavigationTimer = window.setTimeout(function () {
-      feedNavigationLocked = false;
-    }, 420);
+    transitionFeedToIndex(nextIndex, direction, velocity);
   }
 
   function bindFeedNavigation() {
@@ -1461,7 +1527,9 @@
 
     let wheelDistance = 0;
     let wheelResetTimer = null;
+    let lastWheelTime = window.performance.now();
     let touchStartY = null;
+    let touchStartTime = 0;
 
     const handleWheel = function (event) {
       if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
@@ -1469,6 +1537,9 @@
       }
       event.preventDefault();
       enableFeedAudio();
+      const now = window.performance.now();
+      const elapsed = Math.max(8, now - lastWheelTime);
+      lastWheelTime = now;
       wheelDistance += event.deltaY;
       window.clearTimeout(wheelResetTimer);
       wheelResetTimer = window.setTimeout(function () {
@@ -1478,11 +1549,13 @@
         return;
       }
       const direction = wheelDistance > 0 ? 1 : -1;
+      const velocity = Math.min(1, Math.abs(event.deltaY) / elapsed / 3 + Math.abs(wheelDistance) / 180);
       wheelDistance = 0;
-      navigateFeedBy(direction);
+      navigateFeedBy(direction, velocity);
     };
     const handleTouchStart = function (event) {
       touchStartY = event.touches.length ? event.touches[0].clientY : null;
+      touchStartTime = window.performance.now();
     };
     const handleTouchEnd = function (event) {
       if (touchStartY == null || !event.changedTouches.length) {
@@ -1493,7 +1566,9 @@
       touchStartY = null;
       if (Math.abs(distance) >= 48) {
         enableFeedAudio();
-        navigateFeedBy(distance > 0 ? 1 : -1);
+        const elapsed = Math.max(40, window.performance.now() - touchStartTime);
+        const velocity = Math.min(1, Math.abs(distance) / elapsed / 1.2 + Math.abs(distance) / 400);
+        navigateFeedBy(distance > 0 ? 1 : -1, velocity);
       }
     };
     const handleKeydown = function (event) {
@@ -1504,11 +1579,11 @@
       if (event.key === "ArrowDown" || event.key === "PageDown") {
         event.preventDefault();
         enableFeedAudio();
-        navigateFeedBy(1);
+        navigateFeedBy(1, 0.55);
       } else if (event.key === "ArrowUp" || event.key === "PageUp") {
         event.preventDefault();
         enableFeedAudio();
-        navigateFeedBy(-1);
+        navigateFeedBy(-1, 0.55);
       }
     };
 
@@ -1549,7 +1624,7 @@
     });
   }
 
-  function bindFeedPlayers() {
+  function bindFeedPlayers(preferredCard, shouldActivate) {
     const cards = Array.from(app.querySelectorAll("[data-feed-card]"));
     if (!cards.length) {
       return;
@@ -1618,14 +1693,16 @@
         previousPlaybackTime = video.currentTime;
       });
     });
-    activateFeedCard(cards[0]);
+    if (shouldActivate !== false) {
+      activateFeedCard(preferredCard || cards[0]);
+    }
   }
 
   function cleanupFeedObservers(reportWatch) {
+    feedTransitionGeneration += 1;
     if (feedNavigationCleanup) {
       feedNavigationCleanup();
     }
-    window.clearTimeout(feedNavigationTimer);
     feedNavigationLocked = false;
 
     app.querySelectorAll("[data-feed-card]").forEach(function (card) {

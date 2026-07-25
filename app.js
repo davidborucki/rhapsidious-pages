@@ -463,8 +463,9 @@
   function syncShell(route) {
     const isSignedIn = Boolean(currentUser);
     document.documentElement.classList.toggle("feed-route", route === routes.feed);
+    document.documentElement.classList.toggle("signed-in", isSignedIn);
     brandLink.href = isSignedIn ? routes.feed : routes.login;
-    brandLink.setAttribute("aria-label", isSignedIn ? "Voxxly Soundbites" : "Voxxly login");
+    brandLink.setAttribute("aria-label", isSignedIn ? "Voxxly Soundbytes" : "Voxxly login");
     primaryNav.classList.toggle("hidden", !isSignedIn);
     guestNav.classList.toggle("hidden", isSignedIn);
     accountLink.classList.toggle("hidden", !isSignedIn);
@@ -916,7 +917,7 @@
       <section class="feed-page" aria-labelledby="feedTitle">
         <div class="feed-heading-row">
           <div>
-            <h1 id="feedTitle" class="page-title">Soundbites</h1>
+            <h1 id="feedTitle" class="page-title">Soundbytes</h1>
           </div>
         </div>
         ${content}

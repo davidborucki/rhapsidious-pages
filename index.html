@@ -11,7 +11,7 @@
     <title>Voxxly · Soundbites worth hearing</title>
     <link rel="icon" type="image/png" sizes="192x192" href="./assets/voxxly-logo-192.png?v=20260714-4" />
     <link rel="apple-touch-icon" href="./assets/voxxly-logo-192.png?v=20260714-4" />
-    <link rel="stylesheet" href="./styles.css?v=20260724-6" />
+    <link rel="stylesheet" href="./styles.css?v=20260724-7" />
   </head>
   <body>
     <header class="site-header">
@@ -20,13 +20,6 @@
           <img class="brand-mark" src="./assets/voxxly-logo-192.png" alt="" />
           <span class="brand-wordmark">voxxly</span>
         </a>
-
-        <nav id="primaryNav" class="primary-nav hidden" aria-label="Primary navigation">
-          <a class="nav-link" data-route="#/feed" href="#/feed">Soundbites</a>
-          <a class="nav-link" data-route="#/saved" href="#/saved">Saved</a>
-          <a class="nav-link" data-route="#/search" href="#/search">Search</a>
-          <a class="nav-link" data-route="#/upload" href="#/upload">Upload</a>
-        </nav>
 
         <div class="header-actions">
           <nav id="guestNav" class="guest-nav" aria-label="Account navigation">
@@ -39,10 +32,33 @@
       </div>
     </header>
 
+    <nav id="primaryNav" class="primary-nav hidden" aria-label="Primary navigation">
+      <a class="nav-link" data-route="#/feed" href="#/feed">
+        <span class="nav-icon nav-icon-audio-lines" aria-hidden="true"></span>
+        <span>Soundbytes</span>
+      </a>
+      <a class="nav-link" data-route="#/search" href="#/search">
+        <span class="nav-icon nav-icon-search" aria-hidden="true"></span>
+        <span>Search</span>
+      </a>
+      <a class="nav-link" data-route="#/saved" href="#/saved">
+        <span class="nav-icon nav-icon-bookmark" aria-hidden="true"></span>
+        <span>Saved</span>
+      </a>
+      <a class="nav-link" data-route="#/upload" href="#/upload">
+        <span class="nav-icon nav-icon-ticket-plus" aria-hidden="true"></span>
+        <span>Upload</span>
+      </a>
+      <a class="nav-link" data-route="#/profile" href="#/profile">
+        <span class="nav-icon nav-icon-user" aria-hidden="true"></span>
+        <span>Profile</span>
+      </a>
+    </nav>
+
     <main id="app" class="app-shell" tabindex="-1"></main>
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
     <script src="./config.js?v=20260714-4"></script>
-    <script src="./app.js?v=20260724-6"></script>
+    <script src="./app.js?v=20260724-7"></script>
   </body>
 </html>

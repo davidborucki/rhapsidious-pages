@@ -962,7 +962,7 @@ h1[tabindex="-1"]:focus {
   transform: translateX(-50%);
 }
 
-.feed-watch-action:hover {
+.social-action.feed-watch-action:hover:not(:disabled) {
   color: #fff;
   transform: translate(-50%, -1px);
 }

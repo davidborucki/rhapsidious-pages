@@ -120,6 +120,7 @@
       searched: false,
       error: "",
       requestId: 0,
+      recentRequestId: 0,
       recentSearches: []
     };
   }
@@ -184,7 +185,35 @@
     return currentUser ? `${recentSearchStorageKeyPrefix}_${currentUser.id}` : "";
   }
 
-  function loadRecentProfileSearches() {
+  function normalizeRecentProfileSearches(payload) {
+    const users = Array.isArray(payload) ? payload : payload && payload.users;
+    if (!Array.isArray(users)) {
+      return null;
+    }
+    const seenUserIds = new Set();
+    return users.filter(function (user) {
+      if (!user || user.id == null || typeof user.username !== "string" || !user.username) {
+        return false;
+      }
+      const userId = String(user.id);
+      if (seenUserIds.has(userId)) {
+        return false;
+      }
+      seenUserIds.add(userId);
+      return true;
+    }).slice(0, 10).map(function (user) {
+      return { id: user.id, username: user.username, profilePhotoUrl: user.profilePhotoUrl || "" };
+    });
+  }
+
+  function cacheRecentProfileSearches(users) {
+    const storageKey = getRecentSearchStorageKey();
+    if (storageKey) {
+      safeStorageSet(window.localStorage, storageKey, JSON.stringify(users));
+    }
+  }
+
+  function loadCachedRecentProfileSearches() {
     const storageKey = getRecentSearchStorageKey();
     if (!storageKey) {
       return [];
@@ -194,29 +223,53 @@
       if (!Array.isArray(stored)) {
         return [];
       }
-      return stored.filter(function (user) {
-        return user && user.id != null && typeof user.username === "string" && user.username;
-      }).slice(0, 10).map(function (user) {
-        return { id: user.id, username: user.username, profilePhotoUrl: user.profilePhotoUrl || "" };
-      });
+      return normalizeRecentProfileSearches(stored) || [];
     } catch (error) {
       return [];
     }
   }
 
-  function rememberRecentProfileSearch(user) {
+  function setRecentProfileSearches(users) {
+    searchState.recentSearches = users;
+    cacheRecentProfileSearches(users);
+  }
+
+  async function rememberRecentProfileSearch(user) {
     if (!user || user.id == null || !currentUser) {
       return;
     }
+    const state = searchState;
+    const generation = sessionGeneration;
+    const viewerId = currentUser.id;
+    const requestId = state.recentRequestId + 1;
+    state.recentRequestId = requestId;
     const recentUser = {
       id: user.id,
       username: user.username || "Voxxly user",
       profilePhotoUrl: user.profilePhotoUrl || ""
     };
-    searchState.recentSearches = [recentUser].concat(searchState.recentSearches.filter(function (candidate) {
+    const optimisticUsers = [recentUser].concat(state.recentSearches.filter(function (candidate) {
       return String(candidate.id) !== String(recentUser.id);
     })).slice(0, 10);
-    safeStorageSet(window.localStorage, getRecentSearchStorageKey(), JSON.stringify(searchState.recentSearches));
+    setRecentProfileSearches(optimisticUsers);
+
+    try {
+      const payload = await requestJson(searchConfig.recentUsersPath || "/ios/users/me/recent-searches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ searchedUserId: user.id })
+      });
+      if (searchState !== state || state.recentRequestId !== requestId || sessionGeneration !== generation || !currentUser || String(currentUser.id) !== String(viewerId)) {
+        return;
+      }
+      const syncedUsers = normalizeRecentProfileSearches(payload);
+      if (syncedUsers) {
+        setRecentProfileSearches(syncedUsers);
+      }
+    } catch (error) {
+      // Keep the optimistic browser copy as an offline fallback. The next
+      // successful drawer load will replace it with the server's account copy.
+    }
   }
 
   function randomId(prefix) {
@@ -2455,11 +2508,40 @@
     }
   }
 
+  async function loadSyncedRecentProfileSearches() {
+    if (!currentUser) {
+      return;
+    }
+    const state = searchState;
+    const generation = sessionGeneration;
+    const viewerId = currentUser.id;
+    const requestId = state.recentRequestId + 1;
+    state.recentRequestId = requestId;
+
+    try {
+      const payload = await requestJson(searchConfig.recentUsersPath || "/ios/users/me/recent-searches");
+      if (searchState !== state || state.recentRequestId !== requestId || sessionGeneration !== generation || !currentUser || String(currentUser.id) !== String(viewerId)) {
+        return;
+      }
+      const syncedUsers = normalizeRecentProfileSearches(payload);
+      if (!syncedUsers) {
+        throw new ApiError("Recent profile searches returned an unexpected response.", 500, payload);
+      }
+      setRecentProfileSearches(syncedUsers);
+      if (searchDrawerOpen && !state.query) {
+        updateSearchResults();
+      }
+    } catch (error) {
+      // The cached account-scoped list remains visible if the server is
+      // temporarily unavailable.
+    }
+  }
+
   function openSearchDrawer(options) {
     if (!currentUser) {
       return;
     }
-    searchState.recentSearches = loadRecentProfileSearches();
+    searchState.recentSearches = loadCachedRecentProfileSearches();
     searchDrawerOpen = true;
     renderSearchDrawer(options);
     searchDrawer.inert = false;
@@ -2470,6 +2552,7 @@
       }
     });
     syncShell(getRoute());
+    loadSyncedRecentProfileSearches();
   }
 
   function closeSearchDrawer() {

@@ -47,7 +47,8 @@ window.APP_CONFIG = {
     followStatePathTemplate: "/ios/users/{viewerId}/follows/{creatorId}"
   },
   search: {
-    usersPath: "/ios/users/search"
+    usersPath: "/ios/users/search",
+    recentUsersPath: "/ios/users/me/recent-searches"
   },
   profile: {
     clipsPathTemplate: "/ios/users/{userId}/clips",

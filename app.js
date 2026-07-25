@@ -846,13 +846,15 @@
           <video
             class="soundbite-video"
             data-feed-video
-            controls
+            data-clip-title="${escapeHtml(item.name || "soundbite")}"
             playsinline
             muted
+            tabindex="0"
+            role="button"
             preload="metadata"
             src="${escapeHtml(streamUrl)}"
             ${posterUrl ? `poster="${escapeHtml(posterUrl)}"` : ""}
-            aria-label="Play ${escapeHtml(item.name || "soundbite")}">
+            aria-label="Turn sound on for ${escapeHtml(item.name || "soundbite")}">
           </video>
           ${item.isMature || item.mature
             ? `<div class="soundbite-labels"><span class="badge badge-warning">Mature${item.minimumAge ? ` · ${escapeHtml(item.minimumAge)}+` : ""}</span></div>`
@@ -864,15 +866,15 @@
               ? `<a class="feed-full-episode" data-full-episode="${escapeHtml(item.id)}" href="${escapeHtml(episodeUrl)}" target="_blank" rel="noreferrer">Full episode</a>`
               : ""}
           </div>
-          <aside class="feed-action-rail" aria-label="Soundbite actions">
-            <a class="feed-avatar-link" href="${escapeHtml(creatorRoute)}" aria-label="View @${escapeHtml(creatorName)} profile">
-              ${avatarMarkup(creator, creatorName, "feed-creator-avatar")}
-            </a>
-            ${renderLikeButton(item.id)}
-            ${renderSocialButton("save", item.id)}
-            ${renderSocialButton("repost", item.id)}
-          </aside>
         </div>
+        <aside class="feed-action-rail" aria-label="Soundbite actions">
+          <a class="feed-avatar-link" href="${escapeHtml(creatorRoute)}" aria-label="View @${escapeHtml(creatorName)} profile">
+            ${avatarMarkup(creator, creatorName, "feed-creator-avatar")}
+          </a>
+          ${renderLikeButton(item.id)}
+          ${renderSocialButton("save", item.id)}
+          ${renderSocialButton("repost", item.id)}
+        </aside>
       </article>
     `;
   }
@@ -1437,7 +1439,7 @@
       }
       if (isActive) {
         video.play().catch(function () {
-          // Native controls remain available if autoplay is blocked.
+          // Playback can still begin after the user activates the video.
         });
       } else if (!video.paused) {
         video.pause();
@@ -1464,6 +1466,32 @@
       }
 
       video.dataset.feedBound = "true";
+      const updatePlaybackLabel = function () {
+        const title = video.getAttribute("data-clip-title") || "soundbite";
+        video.setAttribute("aria-label", video.muted ? `Turn sound on for ${title}` : `${video.paused ? "Play" : "Pause"} ${title}`);
+      };
+      const togglePlayback = function () {
+        if (video.muted) {
+          video.muted = false;
+          if (video.paused) {
+            video.play().catch(function () {});
+          }
+          updatePlaybackLabel();
+          return;
+        }
+        if (video.paused) {
+          video.play().catch(function () {});
+        } else {
+          video.pause();
+        }
+      };
+      video.addEventListener("click", togglePlayback);
+      video.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          togglePlayback();
+        }
+      });
       video.addEventListener("play", function () {
         app.querySelectorAll("[data-feed-video]").forEach(function (otherVideo) {
           if (otherVideo !== video && !otherVideo.paused) {
@@ -1471,12 +1499,15 @@
           }
         });
         startWatching(clipId);
+        updatePlaybackLabel();
       });
       video.addEventListener("pause", function () {
         stopWatching(clipId, true);
+        updatePlaybackLabel();
       });
       video.addEventListener("ended", function () {
         stopWatching(clipId, true);
+        updatePlaybackLabel();
       });
     });
 

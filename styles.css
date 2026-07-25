@@ -655,19 +655,17 @@ h1[tabindex="-1"]:focus {
 }
 
 .soundbite-card {
-  width: min(100%, 390px);
+  width: min(100%, 474px);
   margin: 0 auto;
-  aspect-ratio: 9 / 16;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
-  background: #0b0a11;
-  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-columns: minmax(0, 390px) 66px;
+  align-items: center;
+  gap: 18px;
   scroll-margin-top: calc(var(--header-height) + 18px);
   scroll-snap-align: start;
 }
 
-.soundbite-card.is-active {
+.soundbite-card.is-active .soundbite-media {
   border-color: rgba(255, 129, 0, 0.3);
 }
 
@@ -679,9 +677,12 @@ h1[tabindex="-1"]:focus {
   display: grid;
   place-items: center;
   overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
   background:
     radial-gradient(circle at center, rgba(255, 126, 0, 0.09), transparent 45%),
     #030306;
+  box-shadow: var(--shadow);
 }
 
 .soundbite-media::after {
@@ -701,6 +702,7 @@ h1[tabindex="-1"]:focus {
   object-fit: contain;
   object-position: center;
   background: #000;
+  cursor: pointer;
 }
 
 .soundbite-labels {
@@ -755,9 +757,10 @@ h1[tabindex="-1"]:focus {
 .feed-video-copy {
   position: absolute;
   z-index: 3;
-  right: 104px;
-  bottom: 76px;
+  right: 26px;
+  bottom: 26px;
   left: 26px;
+  pointer-events: none;
 }
 
 .feed-overlay-creator {
@@ -767,6 +770,7 @@ h1[tabindex="-1"]:focus {
   font-weight: 750;
   text-decoration: none;
   text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+  pointer-events: auto;
 }
 
 .feed-overlay-creator:hover {
@@ -800,6 +804,7 @@ h1[tabindex="-1"]:focus {
   font-weight: 700;
   text-decoration: none;
   transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
+  pointer-events: auto;
 }
 
 .feed-full-episode:hover {
@@ -809,12 +814,9 @@ h1[tabindex="-1"]:focus {
 }
 
 .feed-action-rail {
-  position: absolute;
-  z-index: 4;
-  right: 18px;
-  bottom: 72px;
   display: flex;
   align-items: center;
+  align-self: center;
   flex-direction: column;
   gap: 14px;
 }
@@ -1602,14 +1604,9 @@ a.profile-stat:hover {
   }
 
   .feed-video-copy {
-    right: 88px;
-    bottom: 68px;
+    right: 20px;
+    bottom: 20px;
     left: 20px;
-  }
-
-  .feed-action-rail {
-    right: 10px;
-    bottom: 64px;
   }
 
   .profile-hero {
@@ -1666,8 +1663,8 @@ a.profile-stat:hover {
   }
 
   .feed-video-copy {
-    right: 78px;
-    bottom: 62px;
+    right: 16px;
+    bottom: 16px;
     left: 16px;
   }
 
@@ -1679,9 +1676,12 @@ a.profile-stat:hover {
     margin-top: 12px;
   }
 
+  .soundbite-card {
+    grid-template-columns: minmax(0, 1fr) 58px;
+    gap: 8px;
+  }
+
   .feed-action-rail {
-    right: 6px;
-    bottom: 58px;
     gap: 10px;
   }
 

@@ -37,7 +37,17 @@ html {
 }
 
 html.feed-route {
-  scroll-snap-type: y proximity;
+  overflow: hidden;
+}
+
+html.feed-route body {
+  overflow: hidden;
+}
+
+.feed-route .app-shell {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 body {
@@ -686,27 +696,43 @@ h1[tabindex="-1"]:focus {
 }
 
 .feed-page {
+  position: relative;
   width: min(100% - 40px, 1120px);
+  height: 100dvh;
   margin: 0 auto;
-  padding: 18px 0 80px;
+  padding: 18px 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.feed-page > #feedInlineStatus {
+  position: absolute;
+  z-index: 10;
+  right: 20px;
+  bottom: 20px;
+  left: 20px;
+  margin: 0 !important;
 }
 
 .feed-list {
+  width: 100%;
+  height: 100%;
   display: grid;
-  gap: 28px;
+  place-items: center;
+  overflow: hidden;
 }
 
 .soundbite-card {
   position: relative;
   isolation: isolate;
-  width: min(100%, 514px);
+  width: min(100%, 514px, calc(56.25dvh + 63.75px));
   margin: 0 auto;
   display: grid;
   grid-template-columns: minmax(0, 430px) 66px;
   align-items: center;
   gap: 18px;
-  scroll-margin-top: 18px;
-  scroll-snap-align: start;
 }
 
 .feed-ambient-glow {
@@ -1683,6 +1709,10 @@ a.profile-stat:hover {
     padding-bottom: 108px;
   }
 
+  .soundbite-card {
+    width: min(100%, calc(56.25dvh - 26px));
+  }
+
   .auth-page {
     padding-top: calc(var(--header-height) + 24px);
   }
@@ -1781,6 +1811,7 @@ a.profile-stat:hover {
   }
 
   .soundbite-card {
+    width: min(100%, calc(56.25dvh - 44px));
     grid-template-columns: minmax(0, 1fr) 58px;
     gap: 8px;
   }

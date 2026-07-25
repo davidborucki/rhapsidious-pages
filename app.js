@@ -48,9 +48,10 @@
   let toastTimer = null;
   let sessionGeneration = 0;
   let pendingProtectedHash = "";
-  let feedPlayerObserver = null;
-  let feedSentinelObserver = null;
-  let feedVisibilityRatios = new Map();
+  let feedNavigationCleanup = null;
+  let feedNavigationLocked = false;
+  let feedNavigationTimer = null;
+  let feedAudioEnabled = false;
   let creatorCache = new Map();
   let feedWatchRecords = new Map();
 
@@ -65,6 +66,8 @@
       fallbackAttempted: false,
       sharedClipId: sharedClipId || getHashQueryParam("clip"),
       sharedClipLoaded: false,
+      activeIndex: 0,
+      pendingAdvance: false,
       likedIds: new Set(),
       error: "",
       sessionId: randomId("soundbites")
@@ -510,6 +513,7 @@
 
   function resetUserData() {
     sessionGeneration += 1;
+    feedAudioEnabled = false;
     feedState = createFeedState(getHashQueryParam("clip", pendingProtectedHash || window.location.hash));
     profileState = createProfileState();
     socialState = createSocialState();
@@ -885,14 +889,14 @@
 
   function renderFeed(options) {
     const renderOptions = options || {};
-    const savedScrollY = renderOptions.preserveScroll ? window.scrollY : null;
-    cleanupFeedObservers(false);
+    cleanupFeedObservers(Boolean(renderOptions.reportWatch));
     const hasItems = feedState.items.length > 0;
     const needsInitialLoad = !feedState.started && !feedState.error;
 
     let content = "";
     if (hasItems) {
-      content = `<div id="feedList" class="feed-list">${feedState.items.map(renderFeedItem).join("")}</div>`;
+      feedState.activeIndex = Math.max(0, Math.min(feedState.activeIndex, feedState.items.length - 1));
+      content = `<div id="feedList" class="feed-list">${renderFeedItem(feedState.items[feedState.activeIndex])}</div>`;
     } else if (feedState.loading || needsInitialLoad) {
       content = `<div class="skeleton skeleton-card" role="status" aria-label="Loading your recommended Soundbites"></div>`;
     } else if (feedState.error) {
@@ -921,13 +925,6 @@
         <h1 id="feedTitle" class="sr-only">Soundbytes</h1>
         ${content}
         ${hasItems ? `<div id="feedInlineStatus" class="${feedState.error ? "status status-error" : "hidden"}" role="alert" style="margin-top:18px">${escapeHtml(feedState.error)}</div>` : ""}
-        ${hasItems ? `
-          <div id="feedSentinel" class="feed-load-more">
-            ${feedState.hasMore
-              ? `<button id="loadMoreFeed" class="quiet-button" type="button" ${feedState.loading ? "disabled" : ""}>${feedState.loading ? "Loading more…" : "Load more Soundbites"}</button>`
-              : `<p class="muted">You’re caught up for now.</p>`}
-          </div>
-        ` : ""}
       </section>
     `;
 
@@ -938,27 +935,17 @@
         loadMoreFeed();
       });
     }
-    const loadMoreButton = document.getElementById("loadMoreFeed");
-    if (loadMoreButton) {
-      loadMoreButton.addEventListener("click", loadMoreFeed);
-    }
-
     bindFeedItemActions();
-
     bindFeedPlayers();
-    bindFeedSentinel();
+    bindFeedNavigation();
 
     if (!socialState.loaded && !socialState.loading && !socialState.error) {
       window.queueMicrotask(loadSocialCollections);
     }
 
-    if (savedScrollY != null) {
-      window.requestAnimationFrame(function () {
-        window.scrollTo({ top: savedScrollY, behavior: "auto" });
-      });
-    }
-
     if (needsInitialLoad) {
+      window.queueMicrotask(loadMoreFeed);
+    } else if (hasItems && feedState.hasMore && !feedState.loading && feedState.activeIndex >= feedState.items.length - 2) {
       window.queueMicrotask(loadMoreFeed);
     }
   }
@@ -1222,19 +1209,6 @@
       status.textContent = feedState.error || "";
       status.className = feedState.error ? "status status-error" : "hidden";
     }
-
-    const sentinel = document.getElementById("feedSentinel");
-    if (!sentinel) {
-      return;
-    }
-    sentinel.innerHTML = feedState.hasMore
-      ? `<button id="loadMoreFeed" class="quiet-button" type="button" ${feedState.loading ? "disabled" : ""}>${feedState.loading ? "Loading more…" : "Load more Soundbites"}</button>`
-      : `<p class="muted">You’re caught up for now.</p>`;
-    const loadMoreButton = document.getElementById("loadMoreFeed");
-    if (loadMoreButton) {
-      loadMoreButton.addEventListener("click", loadMoreFeed);
-    }
-    bindFeedSentinel();
   }
 
   async function loadCreator(userId) {
@@ -1273,6 +1247,7 @@
     const generation = sessionGeneration;
     const userId = currentUser.id;
     const hadItems = state.items.length > 0;
+    let advancedToNewItem = false;
     const isCurrentRequest = function () {
       return feedState === state && sessionGeneration === generation && currentUser && String(currentUser.id) === String(userId);
     };
@@ -1354,20 +1329,19 @@
       if (!isCurrentRequest()) {
         return;
       }
+      const firstNewIndex = state.items.length;
       state.items = state.items.concat(newItems);
       state.page += 1;
       state.hasMore = !state.usingFallback && payload.length >= batchSize && newItems.length > 0;
 
-      if (hadItems && getRoute() === routes.feed) {
-        const feedList = document.getElementById("feedList");
-        if (feedList && newItems.length) {
-          feedList.insertAdjacentHTML("beforeend", newItems.map(renderFeedItem).join(""));
-          bindFeedItemActions();
-          bindFeedPlayers();
-        }
+      if (state.pendingAdvance && newItems.length) {
+        state.activeIndex = firstNewIndex;
+        advancedToNewItem = true;
       }
+      state.pendingAdvance = false;
     } catch (error) {
       if (isCurrentRequest()) {
+        state.pendingAdvance = false;
         state.error = error.message || "Unable to load recommendations right now.";
       }
     } finally {
@@ -1376,7 +1350,11 @@
         return;
       }
       if (hadItems) {
-        updateFeedFooter();
+        if (advancedToNewItem) {
+          renderFeed({ reportWatch: true });
+        } else {
+          updateFeedFooter();
+        }
       } else {
         renderFeed();
       }
@@ -1437,6 +1415,102 @@
     });
   }
 
+  function navigateFeedBy(direction) {
+    if (!direction || feedNavigationLocked || !feedState.items.length) {
+      return;
+    }
+
+    const nextIndex = feedState.activeIndex + (direction > 0 ? 1 : -1);
+    if (nextIndex < 0) {
+      return;
+    }
+    if (nextIndex >= feedState.items.length) {
+      if (direction > 0 && feedState.hasMore) {
+        feedState.pendingAdvance = true;
+        loadMoreFeed();
+      }
+      return;
+    }
+
+    feedState.activeIndex = nextIndex;
+    renderFeed({ reportWatch: true });
+    feedNavigationLocked = true;
+    window.clearTimeout(feedNavigationTimer);
+    feedNavigationTimer = window.setTimeout(function () {
+      feedNavigationLocked = false;
+    }, 420);
+  }
+
+  function bindFeedNavigation() {
+    const feedPage = app.querySelector(".feed-page");
+    if (!feedPage) {
+      return;
+    }
+
+    let wheelDistance = 0;
+    let wheelResetTimer = null;
+    let touchStartY = null;
+
+    const handleWheel = function (event) {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
+        return;
+      }
+      event.preventDefault();
+      wheelDistance += event.deltaY;
+      window.clearTimeout(wheelResetTimer);
+      wheelResetTimer = window.setTimeout(function () {
+        wheelDistance = 0;
+      }, 180);
+      if (Math.abs(wheelDistance) < 44) {
+        return;
+      }
+      const direction = wheelDistance > 0 ? 1 : -1;
+      wheelDistance = 0;
+      navigateFeedBy(direction);
+    };
+    const handleTouchStart = function (event) {
+      touchStartY = event.touches.length ? event.touches[0].clientY : null;
+    };
+    const handleTouchEnd = function (event) {
+      if (touchStartY == null || !event.changedTouches.length) {
+        touchStartY = null;
+        return;
+      }
+      const distance = touchStartY - event.changedTouches[0].clientY;
+      touchStartY = null;
+      if (Math.abs(distance) >= 48) {
+        navigateFeedBy(distance > 0 ? 1 : -1);
+      }
+    };
+    const handleKeydown = function (event) {
+      const target = event.target;
+      if (target && target.closest && target.closest("input, textarea, select, button, a, video")) {
+        return;
+      }
+      if (event.key === "ArrowDown" || event.key === "PageDown") {
+        event.preventDefault();
+        navigateFeedBy(1);
+      } else if (event.key === "ArrowUp" || event.key === "PageUp") {
+        event.preventDefault();
+        navigateFeedBy(-1);
+      }
+    };
+
+    window.addEventListener("wheel", handleWheel, { passive: false });
+    feedPage.addEventListener("touchstart", handleTouchStart, { passive: true });
+    feedPage.addEventListener("touchend", handleTouchEnd, { passive: true });
+    window.addEventListener("keydown", handleKeydown);
+
+    feedNavigationCleanup = function () {
+      window.clearTimeout(wheelResetTimer);
+      window.removeEventListener("wheel", handleWheel);
+      feedPage.removeEventListener("touchstart", handleTouchStart);
+      feedPage.removeEventListener("touchend", handleTouchEnd);
+      window.removeEventListener("keydown", handleKeydown);
+      feedNavigationCleanup = null;
+    };
+  }
+
   function activateFeedCard(card) {
     app.querySelectorAll("[data-feed-card]").forEach(function (candidate) {
       const video = candidate.querySelector("[data-feed-video]");
@@ -1446,8 +1520,12 @@
         return;
       }
       if (isActive) {
+        video.muted = !feedAudioEnabled;
         video.play().catch(function () {
-          // Playback can still begin after the user activates the video.
+          if (!video.muted) {
+            video.muted = true;
+            video.play().catch(function () {});
+          }
         });
       } else if (!video.paused) {
         video.pause();
@@ -1459,11 +1537,6 @@
     const cards = Array.from(app.querySelectorAll("[data-feed-card]"));
     if (!cards.length) {
       return;
-    }
-
-    if (feedPlayerObserver) {
-      feedPlayerObserver.disconnect();
-      feedPlayerObserver = null;
     }
 
     cards.forEach(function (card) {
@@ -1480,6 +1553,7 @@
       };
       const togglePlayback = function () {
         if (video.muted) {
+          feedAudioEnabled = true;
           video.muted = false;
           if (video.paused) {
             video.play().catch(function () {});
@@ -1518,66 +1592,15 @@
         updatePlaybackLabel();
       });
     });
-
-    if (!("IntersectionObserver" in window)) {
-      activateFeedCard(cards[0]);
-      return;
-    }
-
-    feedVisibilityRatios = new Map();
-    feedPlayerObserver = new window.IntersectionObserver(function (entries) {
-      entries.forEach(function (entry) {
-        feedVisibilityRatios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0);
-      });
-
-      let bestCard = null;
-      let bestRatio = 0;
-      feedVisibilityRatios.forEach(function (ratio, candidate) {
-        if (ratio > bestRatio) {
-          bestRatio = ratio;
-          bestCard = candidate;
-        }
-      });
-
-      if (bestCard && bestRatio >= 0.62) {
-        activateFeedCard(bestCard);
-      } else {
-        activateFeedCard(null);
-      }
-    }, { threshold: [0, 0.35, 0.62, 0.85] });
-
-    cards.forEach(function (card) {
-      feedPlayerObserver.observe(card);
-    });
-  }
-
-  function bindFeedSentinel() {
-    if (feedSentinelObserver) {
-      feedSentinelObserver.disconnect();
-      feedSentinelObserver = null;
-    }
-    const sentinel = document.getElementById("feedSentinel");
-    if (!sentinel || !feedState.hasMore || feedState.loading || feedState.error || !("IntersectionObserver" in window)) {
-      return;
-    }
-
-    feedSentinelObserver = new window.IntersectionObserver(function (entries) {
-      if (entries.some(function (entry) { return entry.isIntersecting; })) {
-        loadMoreFeed();
-      }
-    }, { rootMargin: "600px 0px" });
-    feedSentinelObserver.observe(sentinel);
+    activateFeedCard(cards[0]);
   }
 
   function cleanupFeedObservers(reportWatch) {
-    if (feedPlayerObserver) {
-      feedPlayerObserver.disconnect();
-      feedPlayerObserver = null;
+    if (feedNavigationCleanup) {
+      feedNavigationCleanup();
     }
-    if (feedSentinelObserver) {
-      feedSentinelObserver.disconnect();
-      feedSentinelObserver = null;
-    }
+    window.clearTimeout(feedNavigationTimer);
+    feedNavigationLocked = false;
 
     app.querySelectorAll("[data-feed-card]").forEach(function (card) {
       const video = card.querySelector("[data-feed-video]");
@@ -1589,7 +1612,6 @@
         stopWatching(clipId, true);
       }
     });
-    feedVisibilityRatios = new Map();
   }
 
   function getDefaultClipName(file) {

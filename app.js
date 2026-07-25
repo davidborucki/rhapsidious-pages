@@ -871,12 +871,12 @@
           <div class="feed-video-copy">
             <a class="feed-overlay-creator" href="${escapeHtml(creatorRoute)}" aria-label="View @${escapeHtml(creatorName)} profile">@${escapeHtml(creatorName)}</a>
             <h2 id="clipTitle-${escapeHtml(item.id)}" class="feed-overlay-title">${escapeHtml(item.name || "Untitled soundbite")}</h2>
-            ${episodeUrl
-              ? `<a class="feed-full-episode" data-full-episode="${escapeHtml(item.id)}" href="${escapeHtml(episodeUrl)}" target="_blank" rel="noreferrer">Full episode</a>`
-              : ""}
           </div>
         </div>
         <aside class="feed-action-rail" aria-label="Soundbite actions">
+          ${episodeUrl
+            ? `<a class="social-action feed-watch-action" data-full-episode="${escapeHtml(item.id)}" href="${escapeHtml(episodeUrl)}" target="_blank" rel="noreferrer" aria-label="Watch the full episode for ${escapeHtml(item.name || "this soundbite")}"><img class="feed-watch-icon" src="./assets/popcorn.svg" alt="" aria-hidden="true"><span>Watch</span></a>`
+            : ""}
           <a class="feed-avatar-link" href="${escapeHtml(creatorRoute)}" aria-label="View @${escapeHtml(creatorName)} profile">
             ${avatarMarkup(creator, creatorName, "feed-creator-avatar")}
           </a>

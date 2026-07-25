@@ -882,32 +882,6 @@ h1[tabindex="-1"]:focus {
   text-shadow: 0 3px 18px rgba(0, 0, 0, 0.95);
 }
 
-.feed-full-episode {
-  width: fit-content;
-  min-height: 38px;
-  margin-top: 16px;
-  padding: 9px 14px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text);
-  border: 1px solid rgba(255, 255, 255, 0.32);
-  border-radius: 999px;
-  background: rgba(5, 5, 9, 0.55);
-  backdrop-filter: blur(12px);
-  font-size: 0.86rem;
-  font-weight: 700;
-  text-decoration: none;
-  transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
-  pointer-events: auto;
-}
-
-.feed-full-episode:hover {
-  border-color: rgba(255, 158, 24, 0.7);
-  background: rgba(5, 5, 9, 0.78);
-  transform: translateY(-1px);
-}
-
 .feed-action-rail {
   position: relative;
   z-index: 1;
@@ -977,6 +951,27 @@ h1[tabindex="-1"]:focus {
 
 .social-action[data-repost-clip]:hover:not(:disabled) {
   color: #ffc107;
+}
+
+.feed-watch-action {
+  position: absolute;
+  bottom: calc(100% + 14px);
+  left: 50%;
+  color: #fff;
+  text-decoration: none;
+  transform: translateX(-50%);
+}
+
+.feed-watch-action:hover {
+  color: #fff;
+  transform: translate(-50%, -1px);
+}
+
+.feed-watch-icon {
+  width: 30px;
+  height: 30px;
+  display: block;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.8));
 }
 
 .social-action[data-like-clip].is-active {
@@ -1815,10 +1810,6 @@ a.profile-stat:hover {
     font-size: clamp(1.3rem, 6.5vw, 1.8rem);
   }
 
-  .feed-full-episode {
-    margin-top: 12px;
-  }
-
   .soundbite-card {
     width: min(100%, calc(56.25dvh - 44px));
     grid-template-columns: minmax(0, 1fr) 58px;
@@ -1827,6 +1818,10 @@ a.profile-stat:hover {
 
   .feed-action-rail {
     gap: 10px;
+  }
+
+  .feed-watch-action {
+    bottom: calc(100% + 10px);
   }
 
   .feed-creator-avatar {

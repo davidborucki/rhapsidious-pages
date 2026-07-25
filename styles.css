@@ -259,12 +259,12 @@ input:disabled {
 
 .search-drawer {
   position: fixed;
-  z-index: 95;
+  z-index: 130;
   top: 0;
   bottom: 0;
   left: 0;
   width: clamp(360px, 33.333vw, 640px);
-  padding: calc(var(--header-height) + 16px) 24px 24px;
+  padding: 0 24px 24px;
   overflow-y: auto;
   visibility: hidden;
   border-right: 1px solid var(--line);
@@ -290,9 +290,10 @@ input:disabled {
 }
 
 .search-drawer-header {
-  margin-bottom: 26px;
+  min-height: var(--header-height);
+  margin-bottom: 16px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 18px;
 }
@@ -303,15 +304,8 @@ input:disabled {
   letter-spacing: -0.045em;
 }
 
-.search-drawer-header p {
-  margin: 7px 0 0;
-  color: var(--muted);
-}
-
 .search-drawer-close {
-  position: absolute;
-  top: 20px;
-  right: 20px;
+  flex: 0 0 auto;
   width: 42px;
   height: 42px;
   padding: 0;
@@ -341,10 +335,71 @@ input:disabled {
 
 .search-drawer-form {
   width: 100%;
+  padding: 0;
+  display: block;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.search-input-wrap {
+  position: relative;
+}
+
+.search-drawer .search-drawer-form input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 48px 0 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.search-drawer .search-drawer-form input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.search-clear-button {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted-strong);
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.search-clear-button:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.search-clear-button .search-close-icon {
+  width: 17px;
+  height: 17px;
 }
 
 .search-drawer .search-results {
   margin-top: 20px;
+}
+
+.recent-searches h3 {
+  margin: 0 0 14px;
+  font-size: 1rem;
+}
+
+.recent-searches-empty {
+  margin: 0;
+  padding: 18px 2px;
+  color: var(--muted);
 }
 
 .header-actions {
@@ -1765,10 +1820,10 @@ a.profile-stat:hover {
   }
 
   .search-drawer {
-    z-index: 110;
+    z-index: 130;
     left: 0;
     width: 100%;
-    padding: calc(var(--header-height) + 16px) 18px calc(102px + env(safe-area-inset-bottom, 0px));
+    padding: 0 18px calc(28px + env(safe-area-inset-bottom, 0px));
     border-left: 0;
   }
 

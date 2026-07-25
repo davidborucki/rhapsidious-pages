@@ -40,6 +40,7 @@
   const accessTokenStorageKey = authConfig.accessTokenStorageKey || "voxxly_access_token";
   const refreshTokenStorageKey = authConfig.refreshTokenStorageKey || "voxxly_refresh_token";
   const deviceIdStorageKey = authConfig.deviceIdStorageKey || "voxxly_device_id";
+  const recentSearchStorageKeyPrefix = "voxxly_recent_profile_searches";
 
   let currentUser = null;
   let activeRoute = null;
@@ -118,7 +119,8 @@
       loading: false,
       searched: false,
       error: "",
-      requestId: 0
+      requestId: 0,
+      recentSearches: []
     };
   }
 
@@ -176,6 +178,45 @@
     } catch (error) {
       // In-memory auth still works when storage is unavailable.
     }
+  }
+
+  function getRecentSearchStorageKey() {
+    return currentUser ? `${recentSearchStorageKeyPrefix}_${currentUser.id}` : "";
+  }
+
+  function loadRecentProfileSearches() {
+    const storageKey = getRecentSearchStorageKey();
+    if (!storageKey) {
+      return [];
+    }
+    try {
+      const stored = JSON.parse(safeStorageGet(window.localStorage, storageKey) || "[]");
+      if (!Array.isArray(stored)) {
+        return [];
+      }
+      return stored.filter(function (user) {
+        return user && user.id != null && typeof user.username === "string" && user.username;
+      }).slice(0, 10).map(function (user) {
+        return { id: user.id, username: user.username, profilePhotoUrl: user.profilePhotoUrl || "" };
+      });
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function rememberRecentProfileSearch(user) {
+    if (!user || user.id == null || !currentUser) {
+      return;
+    }
+    const recentUser = {
+      id: user.id,
+      username: user.username || "Voxxly user",
+      profilePhotoUrl: user.profilePhotoUrl || ""
+    };
+    searchState.recentSearches = [recentUser].concat(searchState.recentSearches.filter(function (candidate) {
+      return String(candidate.id) !== String(recentUser.id);
+    })).slice(0, 10);
+    safeStorageSet(window.localStorage, getRecentSearchStorageKey(), JSON.stringify(searchState.recentSearches));
   }
 
   function randomId(prefix) {
@@ -2326,7 +2367,7 @@
 
   function renderSearchResult(user) {
     return `
-      <a class="user-result" href="${escapeHtml(getProfileRoute(user.id))}">
+      <a class="user-result" data-search-user-id="${escapeHtml(user.id)}" href="${escapeHtml(getProfileRoute(user.id))}">
         ${avatarMarkup(user, user.username, "user-result-avatar")}
         <span><strong>${escapeHtml(user.username || "Voxxly user")}</strong><small>@${escapeHtml(user.username || "user")}</small></span>
         <span class="result-arrow" aria-hidden="true">→</span>
@@ -2334,9 +2375,18 @@
     `;
   }
 
+  function getRecentSearchesMarkup() {
+    const recentResults = searchState.recentSearches.length
+      ? `<div class="user-results">${searchState.recentSearches.map(renderSearchResult).join("")}</div>`
+      : `<p class="recent-searches-empty">No recent searches yet.</p>`;
+    return `<section class="recent-searches" aria-labelledby="recentSearchesTitle"><h3 id="recentSearchesTitle">Recent</h3>${recentResults}</section>`;
+  }
+
   function getSearchResultsMarkup() {
     let results = "";
-    if (searchState.loading) {
+    if (!searchState.query) {
+      results = getRecentSearchesMarkup();
+    } else if (searchState.loading) {
       results = `<div class="search-loading" role="status">Searching profiles…</div>`;
     } else if (searchState.error) {
       results = `<div class="status status-error" role="alert">${escapeHtml(searchState.error)}</div>`;
@@ -2344,8 +2394,6 @@
       results = `<div class="user-results">${searchState.results.map(renderSearchResult).join("")}</div>`;
     } else if (searchState.searched) {
       results = `<div class="panel empty-state"><div><h2>No profiles found.</h2><p class="muted">Try the beginning of another username.</p></div></div>`;
-    } else {
-      results = `<div class="search-prompt"><p>Search by username to find people and explore their posts and reposts.</p></div>`;
     }
     return results;
   }
@@ -2354,8 +2402,8 @@
     document.querySelectorAll(".search-results").forEach(function (results) {
       results.innerHTML = getSearchResultsMarkup();
     });
-    document.querySelectorAll("#profileSearchForm button[type='submit']").forEach(function (submitButton) {
-      submitButton.disabled = searchState.loading;
+    document.querySelectorAll("[data-clear-search]").forEach(function (clearButton) {
+      clearButton.classList.toggle("hidden", !searchState.query);
     });
   }
 
@@ -2363,18 +2411,19 @@
     const renderOptions = options || {};
     searchDrawerContent.innerHTML = `
       <div class="search-drawer-header">
-        <div>
-          <h2 id="searchDrawerTitle">Search</h2>
-          <p>Find people on Voxxly.</p>
-        </div>
+        <h2 id="searchDrawerTitle">Search</h2>
         <button id="closeSearchDrawer" class="search-drawer-close" type="button" aria-label="Close search">
           <span class="search-close-icon" aria-hidden="true"></span>
         </button>
       </div>
       <form id="profileSearchForm" class="search-form search-drawer-form" role="search">
         <label class="sr-only" for="profileSearchInput">Search usernames</label>
-        <input id="profileSearchInput" name="query" type="search" autocomplete="off" value="${escapeHtml(searchState.query)}" placeholder="Search @username" maxlength="33" required />
-        <button class="primary-button" type="submit" ${searchState.loading ? "disabled" : ""}>Search</button>
+        <div class="search-input-wrap">
+          <input id="profileSearchInput" name="query" type="search" autocomplete="off" value="${escapeHtml(searchState.query)}" placeholder="Search" maxlength="33" required />
+          <button class="search-clear-button${searchState.query ? "" : " hidden"}" data-clear-search type="button" aria-label="Clear search">
+            <span class="search-close-icon" aria-hidden="true"></span>
+          </button>
+        </div>
       </form>
       <div class="search-results" aria-live="polite">${getSearchResultsMarkup()}</div>
     `;
@@ -2382,8 +2431,15 @@
     document.getElementById("closeSearchDrawer").addEventListener("click", closeSearchDrawer);
     document.getElementById("profileSearchForm").addEventListener("submit", handleProfileSearch);
     document.getElementById("profileSearchInput").addEventListener("input", handleProfileSearchInput);
+    searchDrawerContent.querySelector("[data-clear-search]").addEventListener("click", clearProfileSearch);
     searchDrawerContent.querySelector(".search-results").addEventListener("click", function (event) {
-      if (event.target.closest(".user-result")) {
+      const result = event.target.closest("[data-search-user-id]");
+      if (result) {
+        const userId = result.getAttribute("data-search-user-id");
+        const user = searchState.results.concat(searchState.recentSearches).find(function (candidate) {
+          return String(candidate.id) === String(userId);
+        });
+        rememberRecentProfileSearch(user);
         closeSearchDrawer();
       }
     });
@@ -2403,6 +2459,7 @@
     if (!currentUser) {
       return;
     }
+    searchState.recentSearches = loadRecentProfileSearches();
     searchDrawerOpen = true;
     renderSearchDrawer(options);
     searchDrawer.inert = false;
@@ -2426,26 +2483,6 @@
     syncShell(getRoute());
   }
 
-  function renderSearch() {
-    app.innerHTML = `
-      <section class="page-wrap search-page" aria-labelledby="searchTitle">
-        <header class="page-header">
-          <h1 id="searchTitle" class="page-title">Search</h1>
-          <p class="page-description">Find people on Voxxly.</p>
-        </header>
-        <form id="profileSearchForm" class="search-form" role="search">
-          <label class="sr-only" for="profileSearchInput">Search usernames</label>
-          <input id="profileSearchInput" name="query" type="search" autocomplete="off" value="${escapeHtml(searchState.query)}" placeholder="Search @username" maxlength="33" required />
-          <button class="primary-button" type="submit" ${searchState.loading ? "disabled" : ""}>Search</button>
-        </form>
-        <div class="search-results" aria-live="polite">${getSearchResultsMarkup()}</div>
-      </section>
-    `;
-
-    document.getElementById("profileSearchForm").addEventListener("submit", handleProfileSearch);
-    document.getElementById("profileSearchInput").addEventListener("input", handleProfileSearchInput);
-  }
-
   function normalizeProfileSearchQuery(value) {
     return String(value || "").trim().replace(/^@+/, "");
   }
@@ -2455,6 +2492,24 @@
       return query ? "Use 1–32 letters, numbers, periods, underscores, or dashes." : "";
     }
     return "";
+  }
+
+  function clearProfileSearch() {
+    window.clearTimeout(searchDebounceTimer);
+    searchState.requestId += 1;
+    searchState.query = "";
+    searchState.results = [];
+    searchState.loading = false;
+    searchState.searched = false;
+    searchState.error = "";
+    const input = document.getElementById("profileSearchInput");
+    if (input) {
+      input.value = "";
+    }
+    updateSearchResults();
+    if (input) {
+      input.focus();
+    }
   }
 
   function handleProfileSearchInput(event) {
@@ -2986,7 +3041,7 @@
         renderSaved();
         break;
       case routes.search:
-        renderSearch();
+        renderFeed();
         break;
       case routes.upload:
         if (!uploadState.host && currentUser) {

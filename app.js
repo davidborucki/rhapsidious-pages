@@ -1632,10 +1632,20 @@
     let wheelDistance = 0;
     let wheelGestureEndTimer = null;
     let wheelGestureConsumed = false;
+    let wheelGestureDirection = 0;
+    let wheelGestureConsumedAt = 0;
+    let lastWheelMagnitude = 0;
     let lastWheelTime = window.performance.now();
     let touchStartY = null;
     let touchStartTime = 0;
 
+    const resetWheelGesture = function () {
+      wheelDistance = 0;
+      wheelGestureConsumed = false;
+      wheelGestureDirection = 0;
+      wheelGestureConsumedAt = 0;
+      lastWheelMagnitude = 0;
+    };
     const handleWheel = function (event) {
       if (event.target.closest && event.target.closest(".search-drawer")) {
         return;
@@ -1647,16 +1657,24 @@
       enableFeedAudio();
       const now = window.performance.now();
       const elapsed = Math.max(8, now - lastWheelTime);
+      const magnitude = Math.abs(event.deltaY);
+      const eventDirection = event.deltaY > 0 ? 1 : -1;
       lastWheelTime = now;
       window.clearTimeout(wheelGestureEndTimer);
-      wheelGestureEndTimer = window.setTimeout(function () {
+      wheelGestureEndTimer = window.setTimeout(resetWheelGesture, 150);
+      if (wheelGestureConsumed) {
+        const canStartAnotherGesture = !feedNavigationLocked && now - wheelGestureConsumedAt >= 300;
+        const reversedWithIntent = eventDirection !== wheelGestureDirection && magnitude >= 12;
+        const renewedFingerImpulse = magnitude >= 14 && magnitude >= lastWheelMagnitude * 1.8;
+        lastWheelMagnitude = magnitude;
+        if (!canStartAnotherGesture || (!reversedWithIntent && !renewedFingerImpulse)) {
+          return;
+        }
         wheelDistance = 0;
         wheelGestureConsumed = false;
-      }, 220);
-      if (wheelGestureConsumed) {
-        return;
       }
       wheelDistance += event.deltaY;
+      lastWheelMagnitude = magnitude;
       if (Math.abs(wheelDistance) < 44) {
         return;
       }
@@ -1664,6 +1682,8 @@
       const velocity = Math.min(1, Math.abs(event.deltaY) / elapsed / 3 + Math.abs(wheelDistance) / 180);
       wheelDistance = 0;
       wheelGestureConsumed = true;
+      wheelGestureDirection = direction;
+      wheelGestureConsumedAt = now;
       navigateFeedBy(direction, velocity);
     };
     const handleTouchStart = function (event) {

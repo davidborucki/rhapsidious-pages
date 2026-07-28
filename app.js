@@ -2423,7 +2423,6 @@
       <a class="user-result" data-search-user-id="${escapeHtml(user.id)}" href="${escapeHtml(getProfileRoute(user.id))}">
         ${avatarMarkup(user, user.username, "user-result-avatar")}
         <span><strong>${escapeHtml(user.username || "Voxxly user")}</strong><small>@${escapeHtml(user.username || "user")}</small></span>
-        <span class="result-arrow" aria-hidden="true">→</span>
       </a>
     `;
   }

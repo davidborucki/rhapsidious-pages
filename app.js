@@ -1052,8 +1052,6 @@
 
     if (needsInitialLoad) {
       window.queueMicrotask(loadMoreFeed);
-    } else if (hasItems && feedState.hasMore && !feedState.loading && feedState.activeIndex >= feedState.items.length - 2) {
-      window.queueMicrotask(loadMoreFeed);
     }
   }
 
@@ -1375,7 +1373,6 @@
       : null;
     let advancedToNewItem = -1;
     let advanceVelocity = state.pendingAdvanceVelocity;
-    let restartAfterLoad = false;
     const isCurrentRequest = function () {
       return feedState === state && sessionGeneration === generation && currentUser && String(currentUser.id) === String(userId);
     };
@@ -1489,13 +1486,9 @@
       if (state.pendingAdvance && newItems.length) {
         advancedToNewItem = firstNewIndex;
         advanceVelocity = state.pendingAdvanceVelocity;
-      } else if (state.pendingAdvance && !restartFromEnd) {
-        restartAfterLoad = true;
       }
-      if (!restartAfterLoad) {
-        state.pendingAdvance = false;
-        state.pendingAdvanceVelocity = 0.5;
-      }
+      state.pendingAdvance = false;
+      state.pendingAdvanceVelocity = 0.5;
     } catch (error) {
       if (isCurrentRequest()) {
         state.pendingAdvance = false;
@@ -1511,20 +1504,13 @@
         state.fetchingFromEnd = false;
         return;
       }
-      if (restartAfterLoad) {
-        window.queueMicrotask(function () {
-          if (isCurrentRequest() && getRoute() === routes.feed) {
-            loadMoreFeed({ restartFromEnd: true });
-          }
-        });
-        return;
-      }
       if (hadItems) {
         if (advancedToNewItem >= 0) {
           setFeedEndLoading(false);
           transitionFeedToIndex(advancedToNewItem, 1, advanceVelocity);
         } else {
           setFeedEndLoading(false);
+          feedNavigationLocked = false;
           updateFeedFooter();
         }
       } else {
@@ -1563,11 +1549,11 @@
 
   function reportInteraction(clipId, watchSec, flags) {
     if (!currentUser || !clipId) {
-      return;
+      return Promise.resolve(null);
     }
 
     const extraFlags = flags || {};
-    requestJson(feedConfig.interactionPath || "/iosclips/interactions", {
+    return requestJson(feedConfig.interactionPath || "/iosclips/interactions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1584,7 +1570,38 @@
       })
     }).catch(function () {
       // Interaction telemetry should never interrupt playback.
+      return null;
     });
+  }
+
+  async function finalizeFeedClipBeforeRefresh(clipId) {
+    const record = getWatchRecord(clipId);
+    if (record.startedAt != null) {
+      record.watchedSec += Math.max(0, (window.performance.now() - record.startedAt) / 1000);
+      record.startedAt = null;
+    }
+    record.reportedSec = record.watchedSec;
+
+    const activeCard = Array.from(app.querySelectorAll("[data-feed-card]")).find(function (card) {
+      return String(card.getAttribute("data-clip-id")) === String(clipId);
+    });
+    const video = activeCard && activeCard.querySelector("[data-feed-video]");
+    if (video && !video.paused) {
+      video.pause();
+    }
+
+    await reportInteraction(clipId, record.watchedSec, {});
+  }
+
+  async function refreshFeedAfterLastClip(clipId) {
+    const state = feedState;
+    const generation = sessionGeneration;
+    const userId = currentUser && currentUser.id;
+    await finalizeFeedClipBeforeRefresh(clipId);
+    if (feedState !== state || sessionGeneration !== generation || !currentUser || String(currentUser.id) !== String(userId) || getRoute() !== routes.feed) {
+      return;
+    }
+    await loadMoreFeed({ fromEnd: true, restartFromEnd: true });
   }
 
   function enableFeedAudio() {
@@ -1661,9 +1678,6 @@
       incomingAnimation.cancel();
       feedNavigationLocked = false;
 
-      if (feedState.hasMore && !feedState.loading && feedState.activeIndex >= feedState.items.length - 2) {
-        window.queueMicrotask(loadMoreFeed);
-      }
     });
   }
 
@@ -1677,13 +1691,13 @@
       return;
     }
     if (nextIndex >= feedState.items.length) {
-      if (direction > 0) {
+      if (direction > 0 && !feedState.fetchingFromEnd && !feedState.loading) {
+        const lastClip = feedState.items[feedState.activeIndex];
         feedState.pendingAdvance = true;
         feedState.pendingAdvanceVelocity = velocity;
         setFeedEndLoading(true);
-        if (!feedState.loading) {
-          loadMoreFeed({ fromEnd: true, restartFromEnd: !feedState.hasMore });
-        }
+        feedNavigationLocked = true;
+        refreshFeedAfterLastClip(lastClip.id);
       }
       return;
     }

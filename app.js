@@ -73,6 +73,7 @@
       activeIndex: 0,
       pendingAdvance: false,
       pendingAdvanceVelocity: 0.5,
+      fetchingFromEnd: false,
       likedIds: new Set(),
       error: "",
       sessionId: randomId("soundbites")
@@ -1001,7 +1002,7 @@
     let content = "";
     if (hasItems) {
       feedState.activeIndex = Math.max(0, Math.min(feedState.activeIndex, feedState.items.length - 1));
-      content = `<div id="feedList" class="feed-list"><div class="feed-slide" data-feed-slide>${renderFeedItem(feedState.items[feedState.activeIndex])}</div></div>`;
+      content = `<div id="feedList" class="feed-list${feedState.fetchingFromEnd ? " is-fetching-more" : ""}"><div class="feed-slide" data-feed-slide>${renderFeedItem(feedState.items[feedState.activeIndex])}</div></div>`;
     } else if (feedState.loading || needsInitialLoad) {
       content = `<div class="skeleton skeleton-card" role="status" aria-label="Loading your recommended Soundbites"></div>`;
     } else if (feedState.error) {
@@ -1029,6 +1030,7 @@
       <section class="feed-page" aria-labelledby="feedTitle">
         <h1 id="feedTitle" class="sr-only">Soundbytes</h1>
         ${content}
+        ${hasItems ? `<div id="feedEndLoader" class="feed-end-loader${feedState.fetchingFromEnd ? " is-visible" : ""}" role="status" aria-live="polite" aria-hidden="${feedState.fetchingFromEnd ? "false" : "true"}"><span class="feed-end-spinner" aria-hidden="true"></span><span>Fetching more soundbytes</span></div>` : ""}
         ${hasItems ? `<div id="feedInlineStatus" class="${feedState.error ? "status status-error" : "hidden"}" role="alert" style="margin-top:18px">${escapeHtml(feedState.error)}</div>` : ""}
       </section>
     `;
@@ -1316,6 +1318,19 @@
     }
   }
 
+  function setFeedEndLoading(isLoading) {
+    feedState.fetchingFromEnd = Boolean(isLoading);
+    const feedList = document.getElementById("feedList");
+    const loader = document.getElementById("feedEndLoader");
+    if (feedList) {
+      feedList.classList.toggle("is-fetching-more", feedState.fetchingFromEnd);
+    }
+    if (loader) {
+      loader.classList.toggle("is-visible", feedState.fetchingFromEnd);
+      loader.setAttribute("aria-hidden", String(!feedState.fetchingFromEnd));
+    }
+  }
+
   async function loadCreator(userId) {
     const cacheKey = String(userId);
     const cache = creatorCache;
@@ -1343,8 +1358,11 @@
     }
   }
 
-  async function loadMoreFeed() {
-    if (feedState.loading || !feedState.hasMore || !currentUser) {
+  async function loadMoreFeed(options) {
+    const loadOptions = options || {};
+    const restartFromEnd = Boolean(loadOptions.restartFromEnd);
+    const fromEnd = Boolean(loadOptions.fromEnd || restartFromEnd);
+    if (feedState.loading || (!feedState.hasMore && !restartFromEnd) || !currentUser) {
       return;
     }
 
@@ -1352,11 +1370,22 @@
     const generation = sessionGeneration;
     const userId = currentUser.id;
     const hadItems = state.items.length > 0;
+    const lastClip = fromEnd && hadItems
+      ? state.items[state.activeIndex] || state.items[state.items.length - 1]
+      : null;
     let advancedToNewItem = -1;
     let advanceVelocity = state.pendingAdvanceVelocity;
+    let restartAfterLoad = false;
     const isCurrentRequest = function () {
       return feedState === state && sessionGeneration === generation && currentUser && String(currentUser.id) === String(userId);
     };
+    if (restartFromEnd) {
+      state.sessionId = randomId("soundbites");
+      state.page = 0;
+      state.hasMore = true;
+      state.usingFallback = false;
+      state.fallbackAttempted = false;
+    }
     state.loading = true;
     state.started = true;
     state.error = "";
@@ -1373,7 +1402,12 @@
     url.searchParams.set("userId", userId);
     url.searchParams.set("sessionId", state.sessionId);
     url.searchParams.set("batchSize", batchSize);
-    if (state.page > 0) {
+    if (lastClip && lastClip.id != null) {
+      url.searchParams.set(feedConfig.lastClipIdQueryParam || "lastClipId", lastClip.id);
+    }
+    if (restartFromEnd) {
+      url.searchParams.set(feedConfig.restartQueryParam || "restart", "true");
+    } else if (state.page > 0) {
       url.searchParams.set("cursor", `batch-${state.page + 1}`);
     }
 
@@ -1410,6 +1444,12 @@
         state.fallbackAttempted = true;
         const fallbackUrl = new URL(getApiUrl(feedConfig.path || "/iosclips/feed"));
         fallbackUrl.searchParams.set("viewerUserId", userId);
+        if (lastClip && lastClip.id != null) {
+          fallbackUrl.searchParams.set(feedConfig.lastClipIdQueryParam || "lastClipId", lastClip.id);
+        }
+        if (restartFromEnd) {
+          fallbackUrl.searchParams.set(feedConfig.restartQueryParam || "restart", "true");
+        }
         payload = await requestJson(fallbackUrl.toString());
         state.usingFallback = true;
       }
@@ -1421,7 +1461,7 @@
         throw new ApiError("The Soundbites feed returned an unexpected response.", 500, payload);
       }
 
-      const knownIds = new Set(state.items.map(function (item) { return String(item.id); }));
+      const knownIds = new Set((restartFromEnd && lastClip ? [lastClip] : state.items).map(function (item) { return String(item.id); }));
       const newItems = sharedItems.concat(payload).filter(function (item) {
         const id = String(item && item.id);
         if (!item || !item.id || knownIds.has(id)) {
@@ -1435,16 +1475,27 @@
       if (!isCurrentRequest()) {
         return;
       }
-      const firstNewIndex = state.items.length;
-      state.items = state.items.concat(newItems);
+      let firstNewIndex = state.items.length;
+      if (restartFromEnd && lastClip) {
+        state.items = [lastClip].concat(newItems);
+        state.activeIndex = 0;
+        firstNewIndex = 1;
+      } else {
+        state.items = state.items.concat(newItems);
+      }
       state.page += 1;
       state.hasMore = !state.usingFallback && payload.length >= batchSize && newItems.length > 0;
 
       if (state.pendingAdvance && newItems.length) {
         advancedToNewItem = firstNewIndex;
+        advanceVelocity = state.pendingAdvanceVelocity;
+      } else if (state.pendingAdvance && !restartFromEnd) {
+        restartAfterLoad = true;
       }
-      state.pendingAdvance = false;
-      state.pendingAdvanceVelocity = 0.5;
+      if (!restartAfterLoad) {
+        state.pendingAdvance = false;
+        state.pendingAdvanceVelocity = 0.5;
+      }
     } catch (error) {
       if (isCurrentRequest()) {
         state.pendingAdvance = false;
@@ -1453,13 +1504,27 @@
       }
     } finally {
       state.loading = false;
-      if (!isCurrentRequest() || getRoute() !== routes.feed) {
+      if (!isCurrentRequest()) {
+        return;
+      }
+      if (getRoute() !== routes.feed) {
+        state.fetchingFromEnd = false;
+        return;
+      }
+      if (restartAfterLoad) {
+        window.queueMicrotask(function () {
+          if (isCurrentRequest() && getRoute() === routes.feed) {
+            loadMoreFeed({ restartFromEnd: true });
+          }
+        });
         return;
       }
       if (hadItems) {
         if (advancedToNewItem >= 0) {
+          setFeedEndLoading(false);
           transitionFeedToIndex(advancedToNewItem, 1, advanceVelocity);
         } else {
+          setFeedEndLoading(false);
           updateFeedFooter();
         }
       } else {
@@ -1612,10 +1677,13 @@
       return;
     }
     if (nextIndex >= feedState.items.length) {
-      if (direction > 0 && feedState.hasMore) {
+      if (direction > 0) {
         feedState.pendingAdvance = true;
         feedState.pendingAdvanceVelocity = velocity;
-        loadMoreFeed();
+        setFeedEndLoading(true);
+        if (!feedState.loading) {
+          loadMoreFeed({ fromEnd: true, restartFromEnd: !feedState.hasMore });
+        }
       }
       return;
     }

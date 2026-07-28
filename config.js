@@ -36,7 +36,9 @@ window.APP_CONFIG = {
   feed: {
     path: "/iosclips/feed",
     interactionPath: "/iosclips/interactions",
-    batchSize: 10
+    batchSize: 10,
+    lastClipIdQueryParam: "lastClipId",
+    restartQueryParam: "restart"
   },
   social: {
     savedPath: "/ios/saved-clips",

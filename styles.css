@@ -391,6 +391,14 @@ input:disabled {
   margin-top: 20px;
 }
 
+.search-drawer .user-result {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.search-drawer .result-arrow {
+  display: none;
+}
+
 .recent-searches h3 {
   margin: 0 0 14px;
   font-size: 1rem;

@@ -1630,7 +1630,8 @@
     }
 
     let wheelDistance = 0;
-    let wheelResetTimer = null;
+    let wheelGestureEndTimer = null;
+    let wheelGestureConsumed = false;
     let lastWheelTime = window.performance.now();
     let touchStartY = null;
     let touchStartTime = 0;
@@ -1647,17 +1648,22 @@
       const now = window.performance.now();
       const elapsed = Math.max(8, now - lastWheelTime);
       lastWheelTime = now;
-      wheelDistance += event.deltaY;
-      window.clearTimeout(wheelResetTimer);
-      wheelResetTimer = window.setTimeout(function () {
+      window.clearTimeout(wheelGestureEndTimer);
+      wheelGestureEndTimer = window.setTimeout(function () {
         wheelDistance = 0;
-      }, 180);
+        wheelGestureConsumed = false;
+      }, 220);
+      if (wheelGestureConsumed) {
+        return;
+      }
+      wheelDistance += event.deltaY;
       if (Math.abs(wheelDistance) < 44) {
         return;
       }
       const direction = wheelDistance > 0 ? 1 : -1;
       const velocity = Math.min(1, Math.abs(event.deltaY) / elapsed / 3 + Math.abs(wheelDistance) / 180);
       wheelDistance = 0;
+      wheelGestureConsumed = true;
       navigateFeedBy(direction, velocity);
     };
     const handleTouchStart = function (event) {
@@ -1703,7 +1709,7 @@
     window.addEventListener("keydown", handleKeydown);
 
     feedNavigationCleanup = function () {
-      window.clearTimeout(wheelResetTimer);
+      window.clearTimeout(wheelGestureEndTimer);
       window.removeEventListener("wheel", handleWheel);
       feedPage.removeEventListener("touchstart", handleTouchStart);
       feedPage.removeEventListener("touchend", handleTouchEnd);

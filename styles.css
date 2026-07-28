@@ -333,7 +333,7 @@ input:disabled {
   mask: url("./assets/x.svg") center / contain no-repeat;
 }
 
-.search-drawer-form {
+.search-form.search-drawer-form {
   width: 100%;
   padding: 0;
   display: block;

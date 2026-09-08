@@ -2606,6 +2606,7 @@ html.clip-viewer-open body {
   mask: url("./assets/settings.svg") center / contain no-repeat;
 }
 .settings-page { padding-top: calc(var(--header-height) + 24px); }
+.signed-in.settings-route .app-shell { padding-left: 0; }
 .profile-name-row .secondary-button {
   flex-shrink: 0;
   /* Align to the visible letters, accounting for the heading's descender space. */

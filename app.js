@@ -580,10 +580,11 @@
   function syncShell(route) {
     const isSignedIn = Boolean(currentUser);
     document.documentElement.classList.toggle("feed-route", route === routes.feed);
+    document.documentElement.classList.toggle("settings-route", route === routes.settings);
     document.documentElement.classList.toggle("signed-in", isSignedIn);
     brandLink.href = isSignedIn ? routes.feed : routes.login;
     brandLink.setAttribute("aria-label", isSignedIn ? "Voxxly Soundbytes" : "Voxxly login");
-    primaryNav.classList.toggle("hidden", !isSignedIn);
+    primaryNav.classList.toggle("hidden", !isSignedIn || route === routes.settings);
     guestNav.classList.toggle("hidden", isSignedIn);
     accountLink.classList.toggle("hidden", !isSignedIn);
     logoutButton.classList.toggle("hidden", !isSignedIn);

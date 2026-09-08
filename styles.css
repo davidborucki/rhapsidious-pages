@@ -2596,6 +2596,16 @@ html.clip-viewer-open body {
 }
 
 .profile-name-row .profile-name { min-width: 0; }
+.profile-settings-button,
+.settings-back-button { width: 44px; height: 44px; padding: 0; }
+.profile-settings-button span {
+  width: 24px;
+  height: 24px;
+  background: currentColor;
+  -webkit-mask: url("./assets/settings.svg") center / contain no-repeat;
+  mask: url("./assets/settings.svg") center / contain no-repeat;
+}
+.settings-page { padding-top: calc(var(--header-height) + 24px); }
 .profile-name-row .secondary-button {
   flex-shrink: 0;
   /* Align to the visible letters, accounting for the heading's descender space. */

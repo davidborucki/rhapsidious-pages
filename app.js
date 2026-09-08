@@ -43,10 +43,11 @@
     search: "#/search",
     upload: "#/upload",
     profile: "#/profile",
+    settings: "#/settings",
     connections: "#/connections"
   };
 
-  const protectedRoutes = new Set([routes.feed, routes.saved, routes.search, routes.upload, routes.profile, routes.connections]);
+  const protectedRoutes = new Set([routes.feed, routes.saved, routes.search, routes.upload, routes.profile, routes.settings, routes.connections]);
   const accessTokenStorageKey = authConfig.accessTokenStorageKey || "voxxly_access_token";
   const refreshTokenStorageKey = authConfig.refreshTokenStorageKey || "voxxly_refresh_token";
   const deviceIdStorageKey = authConfig.deviceIdStorageKey || "voxxly_device_id";
@@ -3475,7 +3476,7 @@
         <div class="panel profile-hero">
           ${avatarMarkup(user, user.username, "profile-avatar")}
           <div class="profile-identity">
-            <div class="profile-name-row"><h1 id="profileTitle" class="profile-name">${escapeHtml(user.username || "Voxxly creator")}</h1>${isOwnProfile ? '<button id="editProfile" class="secondary-button" type="button">Edit profile</button>' : ""}</div>
+            <div class="profile-name-row"><h1 id="profileTitle" class="profile-name">${escapeHtml(user.username || "Voxxly creator")}</h1>${isOwnProfile ? '<button id="editProfile" class="secondary-button" type="button">Edit profile</button><a class="secondary-button profile-settings-button" href="#/settings" aria-label="Settings" title="Settings"><span aria-hidden="true"></span></a>' : ""}</div>
             <p class="profile-handle">@${escapeHtml(user.username || "creator")}</p>
             ${!isOwnProfile && state.loaded
               ? (state.followStateKnown
@@ -3753,6 +3754,15 @@
     }
   }
 
+  function renderSettings() {
+    app.innerHTML = `
+      <section class="page-wrap settings-page" aria-label="Settings">
+        <a class="secondary-button settings-back-button" href="${routes.profile}" aria-label="Back to profile" title="Back to profile">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7M5 12h14" /></svg>
+        </a>
+      </section>`;
+  }
+
   function render() {
     closeProfileEditor();
     closeClipViewer({ restoreFocus: false });
@@ -3841,6 +3851,9 @@
         break;
       case routes.profile:
         renderProfile();
+        break;
+      case routes.settings:
+        renderSettings();
         break;
       case routes.connections:
         renderConnections();

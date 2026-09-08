@@ -2652,11 +2652,10 @@
     }
 
     app.innerHTML = `
-      <section class="page-wrap" aria-labelledby="savedTitle">
+      <section class="page-wrap saved-page" aria-labelledby="savedTitle">
         <div class="simple-page-header">
           <div>
             <h1 id="savedTitle" class="page-title">Saved</h1>
-            <p class="page-description">The clips you want to come back to.</p>
           </div>
         </div>
         ${content}

@@ -272,7 +272,7 @@ input:disabled {
   visibility: hidden;
   border-right: 1px solid var(--line);
   border-left: 1px solid var(--line);
-  background: rgba(13, 12, 21, 0.98);
+  background: #0d0c15;
   box-shadow: 24px 0 70px rgba(0, 0, 0, 0.42);
   opacity: 0;
   transform: translate3d(-108%, 0, 0);

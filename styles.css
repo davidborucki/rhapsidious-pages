@@ -568,7 +568,15 @@ input:disabled {
 }
 
 .saved-page {
-  padding-top: calc(var(--header-height) + 110px);
+  padding-top: calc(var(--header-height) + 24px);
+}
+
+.profile-page {
+  padding-top: calc(var(--header-height) + 24px);
+}
+
+.saved-page .page-title {
+  font-size: clamp(2rem, 4.2vw, 3.75rem);
 }
 
 .page-kicker,
@@ -2126,8 +2134,9 @@ a.profile-stat:hover {
     padding-bottom: 108px;
   }
 
-  .saved-page {
-    padding-top: calc(var(--header-height) + 64px);
+  .saved-page,
+  .profile-page {
+    padding-top: calc(var(--header-height) + 16px);
   }
 
   .feed-page {

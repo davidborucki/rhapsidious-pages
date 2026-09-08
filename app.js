@@ -2959,7 +2959,7 @@
     if (!knownUser) {
       const unavailable = Boolean(state.error);
       app.innerHTML = `
-        <section class="page-wrap" aria-labelledby="profileTitle">
+        <section class="page-wrap profile-page" aria-labelledby="profileTitle">
           <header class="page-header">
             <h1 id="profileTitle" class="page-title">${unavailable ? "Profile unavailable" : "Profile"}</h1>
           </header>
@@ -3023,7 +3023,7 @@
     }
 
     app.innerHTML = `
-      <section class="page-wrap" aria-labelledby="profileTitle">
+      <section class="page-wrap profile-page" aria-labelledby="profileTitle">
         <div class="panel profile-hero">
           ${avatarMarkup(user, user.username, "profile-avatar")}
           <div class="profile-identity">

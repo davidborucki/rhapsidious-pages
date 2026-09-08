@@ -2590,7 +2590,7 @@ html.clip-viewer-open body {
 }
 .profile-name-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   flex-wrap: wrap;
   gap: 18px;
 }

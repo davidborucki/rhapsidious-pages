@@ -194,9 +194,12 @@ input:disabled {
 }
 
 .nav-link {
+  width: 164px;
+  max-width: 100%;
   min-height: 46px;
   padding: 11px 10px;
   display: grid;
+  align-self: flex-start;
   grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
@@ -2057,9 +2060,11 @@ a.profile-stat:hover {
   }
 
   .primary-nav .nav-link {
+    width: 100%;
     min-height: 54px;
     padding: 6px 2px;
     display: flex;
+    align-self: stretch;
     flex-direction: column;
     gap: 4px;
     font-size: 0.68rem;

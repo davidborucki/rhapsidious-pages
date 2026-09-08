@@ -1697,7 +1697,7 @@ a.profile-stat:hover {
   gap: clamp(4px, 0.75vw, 10px);
 }
 
-@container clip-grid (min-width: 1160px) {
+@container clip-grid (min-width: 1120px) {
   .clip-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }

@@ -985,6 +985,9 @@
             ${posterUrl ? `poster="${escapeHtml(posterUrl)}"` : ""}
             aria-label="Turn sound on for ${escapeHtml(item.name || "soundbite")}">
           </video>
+          <span class="feed-play-indicator" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="m6.5 5 11 7-11 7V5Z"></path></svg>
+          </span>
           ${renderVideoVolumeControl(item.name)}
           ${item.isMature || item.mature
             ? `<div class="soundbite-labels"><span class="badge badge-warning">Mature${item.minimumAge ? ` · ${escapeHtml(item.minimumAge)}+` : ""}</span></div>`
@@ -1984,6 +1987,7 @@
       let previousPlaybackTime = 0;
       const updatePlaybackLabel = function () {
         const title = video.getAttribute("data-clip-title") || "soundbite";
+        card.querySelector(".soundbite-media").classList.toggle("is-paused", video.paused);
         video.setAttribute("aria-label", video.muted ? `Turn sound on for ${title}` : `${video.paused ? "Play" : "Pause"} ${title}`);
         updateFeedVolumeControl(card, video);
       };
@@ -2810,7 +2814,7 @@
         <video class="clip-viewer-video" data-clip-viewer-video playsinline loop preload="metadata" tabindex="0" role="button"></video>
         ${renderVideoVolumeControl(selectedClip.name)}
         <span class="clip-viewer-play-indicator" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"></path></svg>
+          <svg viewBox="0 0 24 24"><path d="m6.5 5 11 7-11 7V5Z"></path></svg>
         </span>
         <div class="clip-viewer-copy">
           <a class="clip-viewer-creator" data-clip-viewer-creator href="#"></a>

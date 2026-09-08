@@ -1850,7 +1850,8 @@ html.clip-viewer-open body {
   display: none !important;
 }
 
-.clip-viewer-play-indicator {
+.clip-viewer-play-indicator,
+.feed-play-indicator {
   position: absolute;
   z-index: 3;
   top: 50%;
@@ -1869,15 +1870,16 @@ html.clip-viewer-open body {
   pointer-events: none;
 }
 
-.clip-viewer-dialog.is-paused .clip-viewer-play-indicator {
+.clip-viewer-dialog.is-paused .clip-viewer-play-indicator,
+.soundbite-card.is-active .soundbite-media.is-paused .feed-play-indicator {
   opacity: 1;
   transform: translate(-50%, -50%) scale(1);
 }
 
-.clip-viewer-play-indicator svg {
+.clip-viewer-play-indicator svg,
+.feed-play-indicator svg {
   width: 32px;
   height: 32px;
-  margin-left: 4px;
   fill: currentColor;
 }
 

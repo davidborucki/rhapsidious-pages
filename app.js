@@ -24,6 +24,16 @@
   const socialConfig = config.social || {};
   const searchConfig = config.search || {};
   const profileConfig = config.profile || {};
+  const clipUtils = window.CLIP_UTILS || {};
+  const normalizeClip = clipUtils.normalizeClip || function (clip) {
+    return clip && typeof clip === "object" ? { ...clip, thumbnailUrl: clip.thumbnailUrl || null } : clip;
+  };
+  const normalizeClipList = clipUtils.normalizeClipList || function (clips) {
+    return Array.isArray(clips) ? clips.map(normalizeClip) : [];
+  };
+  const getAbsoluteThumbnailUrl = clipUtils.getAbsoluteThumbnailUrl || function () {
+    return "";
+  };
 
   const routes = {
     login: "#/login",
@@ -56,8 +66,10 @@
   let feedNavigationLocked = false;
   let feedTransitionGeneration = 0;
   let feedAudioEnabled = true;
+  let feedVolume = 1;
   let creatorCache = new Map();
   let feedWatchRecords = new Map();
+  let failedThumbnailUrls = new Set();
 
   function createFeedState(sharedClipId) {
     return {
@@ -620,6 +632,7 @@
     searchDrawer.setAttribute("aria-hidden", "true");
     searchDrawer.inert = true;
     feedAudioEnabled = true;
+    feedVolume = 1;
     feedState = createFeedState(getHashQueryParam("clip", pendingProtectedHash || window.location.hash));
     profileState = createProfileState();
     socialState = createSocialState();
@@ -634,6 +647,7 @@
     };
     creatorCache = new Map();
     feedWatchRecords = new Map();
+    failedThumbnailUrls = new Set();
   }
 
   function clearSession() {
@@ -945,7 +959,7 @@
     const creator = creatorCache.get(String(item.iosUserId)) || null;
     const creatorName = (creator && creator.username) || item.creatorName || "Voxxly creator";
     const streamUrl = getSafeMediaUrl(item.streamUrl, `/iosclips/${item.id}/stream`);
-    const posterUrl = getSafeMediaUrl(item.thumbnailUrl);
+    const posterUrl = getAbsoluteThumbnailUrl(item.thumbnailUrl);
     const fullEpisodeUrl = getSafeMediaUrl(item.fullEpisodeFilepath);
     const sourceUrl = getSafeMediaUrl(item.sourceUrl);
     const episodeUrl = fullEpisodeUrl || sourceUrl;
@@ -970,6 +984,25 @@
             ${posterUrl ? `poster="${escapeHtml(posterUrl)}"` : ""}
             aria-label="Turn sound on for ${escapeHtml(item.name || "soundbite")}">
           </video>
+          <div class="feed-volume-control" data-feed-volume-control>
+            <button class="feed-mute-toggle" type="button" data-feed-mute-toggle aria-label="Mute ${escapeHtml(item.name || "soundbite")}" aria-pressed="false">
+              <svg class="feed-volume-icon feed-volume-icon-high" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+              </svg>
+              <svg class="feed-volume-icon feed-volume-icon-low" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+              </svg>
+              <svg class="feed-volume-icon feed-volume-icon-muted" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
+                <path d="m22 9-6 6"></path>
+                <path d="m16 9 6 6"></path>
+              </svg>
+            </button>
+            <input class="feed-volume-slider" data-feed-volume-slider type="range" min="0" max="100" step="1" value="${Math.round(feedVolume * 100)}" aria-label="Volume for ${escapeHtml(item.name || "soundbite")}">
+          </div>
           ${item.isMature || item.mature
             ? `<div class="soundbite-labels"><span class="badge badge-warning">Mature${item.minimumAge ? ` · ${escapeHtml(item.minimumAge)}+` : ""}</span></div>`
             : ""}
@@ -1191,10 +1224,10 @@
         if (!isCurrentRequest()) {
           return;
         }
-        state.savedClips = results[0];
-        state.repostedClips = results[1];
-        state.savedIds = new Set(results[0].map(function (clip) { return String(clip.id); }));
-        state.repostedIds = new Set(results[1].map(function (clip) { return String(clip.id); }));
+        state.savedClips = normalizeClipList(results[0]);
+        state.repostedClips = normalizeClipList(results[1]);
+        state.savedIds = new Set(state.savedClips.map(function (clip) { return String(clip.id); }));
+        state.repostedIds = new Set(state.repostedClips.map(function (clip) { return String(clip.id); }));
         state.loaded = true;
       } catch (error) {
         if (isCurrentRequest()) {
@@ -1418,13 +1451,12 @@
             return;
           }
           if (sharedClip && sharedClip.id) {
-            sharedItems = [{
+            sharedItems = [normalizeClip({
               ...sharedClip,
               streamUrl: sharedClip.streamUrl || `/iosclips/${sharedClip.id}/stream`,
-              thumbnailUrl: sharedClip.thumbnailUrl || getValueByPath(sharedClip, "thumbnailImage.filepath"),
               fullEpisodeName: sharedClip.fullEpisodeName || getValueByPath(sharedClip, "fullEpisode.name"),
               fullEpisodeFilepath: sharedClip.fullEpisodeFilepath || getValueByPath(sharedClip, "fullEpisode.filepath")
-            }];
+            })];
           }
         } catch (error) {
           // A removed or unavailable shared clip should not block the rest of the feed.
@@ -1458,8 +1490,9 @@
         throw new ApiError("The Soundbites feed returned an unexpected response.", 500, payload);
       }
 
+      const normalizedPayload = normalizeClipList(payload);
       const knownIds = new Set((restartFromEnd && lastClip ? [lastClip] : state.items).map(function (item) { return String(item.id); }));
-      const newItems = sharedItems.concat(payload).filter(function (item) {
+      const newItems = sharedItems.concat(normalizedPayload).filter(function (item) {
         const id = String(item && item.id);
         if (!item || !item.id || knownIds.has(id)) {
           return false;
@@ -1481,7 +1514,7 @@
         state.items = state.items.concat(newItems);
       }
       state.page += 1;
-      state.hasMore = !state.usingFallback && payload.length >= batchSize && newItems.length > 0;
+      state.hasMore = !state.usingFallback && normalizedPayload.length >= batchSize && newItems.length > 0;
 
       if (state.pendingAdvance && newItems.length) {
         advancedToNewItem = firstNewIndex;
@@ -1606,14 +1639,74 @@
 
   function enableFeedAudio() {
     feedAudioEnabled = true;
+    applyFeedAudioState();
     const video = app.querySelector("[data-feed-video]");
-    if (!video || !video.muted) {
+    if (!video) {
       return;
     }
-    video.muted = false;
     if (video.paused) {
       video.play().catch(function () {});
     }
+  }
+
+  function updateFeedVolumeControl(card, video) {
+    const control = card && card.querySelector("[data-feed-volume-control]");
+    const button = control && control.querySelector("[data-feed-mute-toggle]");
+    const slider = control && control.querySelector("[data-feed-volume-slider]");
+    if (!control || !button || !slider || !video) {
+      return;
+    }
+
+    const isMuted = video.muted || video.volume === 0;
+    const title = video.getAttribute("data-clip-title") || "soundbite";
+    control.classList.toggle("is-muted", isMuted);
+    control.classList.toggle("is-volume-low", !isMuted && video.volume <= 0.5);
+    button.setAttribute("aria-pressed", String(isMuted));
+    button.setAttribute("aria-label", `${isMuted ? "Unmute" : "Mute"} ${title}`);
+    slider.value = String(isMuted ? 0 : Math.round(video.volume * 100));
+  }
+
+  function applyFeedAudioState() {
+    app.querySelectorAll("[data-feed-card]").forEach(function (card) {
+      const video = card.querySelector("[data-feed-video]");
+      if (!video) {
+        return;
+      }
+      video.volume = feedVolume;
+      video.muted = !feedAudioEnabled;
+      updateFeedVolumeControl(card, video);
+    });
+  }
+
+  function bindFeedVolumeControl(card, video) {
+    const control = card.querySelector("[data-feed-volume-control]");
+    const button = control && control.querySelector("[data-feed-mute-toggle]");
+    const slider = control && control.querySelector("[data-feed-volume-slider]");
+    if (!control || !button || !slider || control.dataset.volumeBound === "true") {
+      return;
+    }
+
+    control.dataset.volumeBound = "true";
+    button.addEventListener("click", function (event) {
+      event.stopPropagation();
+      feedAudioEnabled = video.muted || video.volume === 0;
+      applyFeedAudioState();
+    });
+    slider.addEventListener("input", function (event) {
+      event.stopPropagation();
+      const nextVolume = Math.max(0, Math.min(1, Number(slider.value) / 100));
+      if (nextVolume === 0) {
+        feedAudioEnabled = false;
+      } else {
+        feedVolume = nextVolume;
+        feedAudioEnabled = true;
+      }
+      applyFeedAudioState();
+    });
+    control.addEventListener("click", function (event) {
+      event.stopPropagation();
+    });
+    updateFeedVolumeControl(card, video);
   }
 
   function transitionFeedToIndex(nextIndex, direction, velocity) {
@@ -1720,6 +1813,7 @@
     let lastWheelTime = window.performance.now();
     let touchStartY = null;
     let touchStartTime = 0;
+    let touchStartedOnVolumeControl = false;
 
     const resetWheelGesture = function () {
       wheelDistance = 0;
@@ -1729,7 +1823,7 @@
       lastWheelMagnitude = 0;
     };
     const handleWheel = function (event) {
-      if (event.target.closest && event.target.closest(".search-drawer")) {
+      if (event.target.closest && event.target.closest(".search-drawer, [data-feed-volume-control]")) {
         return;
       }
       if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
@@ -1769,10 +1863,20 @@
       navigateFeedBy(direction, velocity);
     };
     const handleTouchStart = function (event) {
+      touchStartedOnVolumeControl = Boolean(event.target.closest && event.target.closest("[data-feed-volume-control]"));
+      if (touchStartedOnVolumeControl) {
+        touchStartY = null;
+        return;
+      }
       touchStartY = event.touches.length ? event.touches[0].clientY : null;
       touchStartTime = window.performance.now();
     };
     const handleTouchEnd = function (event) {
+      if (touchStartedOnVolumeControl) {
+        touchStartedOnVolumeControl = false;
+        touchStartY = null;
+        return;
+      }
       if (touchStartY == null || !event.changedTouches.length) {
         touchStartY = null;
         return;
@@ -1829,10 +1933,13 @@
         return;
       }
       if (isActive) {
+        video.volume = feedVolume;
         video.muted = !feedAudioEnabled;
+        updateFeedVolumeControl(candidate, video);
         video.play().catch(function () {
           if (!video.muted) {
             video.muted = true;
+            updateFeedVolumeControl(candidate, video);
             video.play().catch(function () {});
           }
         });
@@ -1856,10 +1963,12 @@
       }
 
       video.dataset.feedBound = "true";
+      bindFeedVolumeControl(card, video);
       let previousPlaybackTime = 0;
       const updatePlaybackLabel = function () {
         const title = video.getAttribute("data-clip-title") || "soundbite";
         video.setAttribute("aria-label", video.muted ? `Turn sound on for ${title}` : `${video.paused ? "Play" : "Pause"} ${title}`);
+        updateFeedVolumeControl(card, video);
       };
       const togglePlayback = function () {
         if (video.muted) {
@@ -2458,14 +2567,54 @@
     return 0;
   }
 
+  function renderClipThumbnail(clip) {
+    const thumbnailUrl = getAbsoluteThumbnailUrl(clip && clip.thumbnailUrl);
+    const usableThumbnailUrl = thumbnailUrl && !failedThumbnailUrls.has(thumbnailUrl) ? thumbnailUrl : "";
+    const clipName = (clip && clip.name) || "Untitled soundbite";
+    const clipId = clip && clip.id != null ? clip.id : "";
+    return `
+      <a class="clip-thumbnail-link" href="${routes.feed}?clip=${encodeURIComponent(clipId)}" aria-label="Play ${escapeHtml(clipName)}">
+        <span class="clip-thumbnail-placeholder" aria-hidden="true"><span>V</span></span>
+        ${usableThumbnailUrl ? `<img class="clip-thumbnail-image" data-clip-thumbnail-image data-thumbnail-url="${escapeHtml(usableThumbnailUrl)}" src="${escapeHtml(usableThumbnailUrl)}" width="540" height="960" loading="lazy" decoding="async" alt="">` : ""}
+      </a>
+    `;
+  }
+
+  function bindClipThumbnailErrors() {
+    app.querySelectorAll("[data-clip-thumbnail-image]").forEach(function (image) {
+      if (image.dataset.errorBound === "true") {
+        return;
+      }
+      image.dataset.errorBound = "true";
+      let errorHandled = false;
+      const handleThumbnailError = function () {
+        if (errorHandled) {
+          return;
+        }
+        errorHandled = true;
+        const thumbnailUrl = image.dataset.thumbnailUrl || "";
+        if (thumbnailUrl) {
+          failedThumbnailUrls.add(thumbnailUrl);
+        }
+        image.hidden = true;
+        const thumbnailLink = image.closest(".clip-thumbnail-link");
+        if (thumbnailLink) {
+          thumbnailLink.classList.add("has-thumbnail-error");
+        }
+      };
+      image.addEventListener("error", handleThumbnailError, { once: true });
+      if (image.complete && image.naturalWidth === 0) {
+        handleThumbnailError();
+      }
+    });
+  }
+
   function renderSavedClip(clip) {
-    const streamUrl = getSafeMediaUrl(clip.streamUrl, `/iosclips/${clip.id}/stream`);
-    const posterUrl = getSafeMediaUrl(clip.thumbnailUrl);
     const creator = creatorCache.get(String(clip.iosUserId)) || null;
     const creatorName = (creator && creator.username) || clip.creatorName || "Voxxly creator";
     return `
       <article class="profile-clip saved-clip">
-        <video controls playsinline preload="metadata" src="${escapeHtml(streamUrl)}" ${posterUrl ? `poster="${escapeHtml(posterUrl)}"` : ""} aria-label="Play ${escapeHtml(clip.name || "soundbite")}"></video>
+        ${renderClipThumbnail(clip)}
         <div class="profile-clip-copy">
           <a class="clip-creator-link" href="${escapeHtml(getProfileRoute(clip.iosUserId))}">@${escapeHtml(creatorName)}</a>
           <h3 title="${escapeHtml(clip.name || "Untitled soundbite")}">${escapeHtml(clip.name || "Untitled soundbite")}</h3>
@@ -2489,7 +2638,7 @@
         </div>
       `;
     } else if (socialState.savedClips.length) {
-      content = `<div class="clip-grid">${socialState.savedClips.map(renderSavedClip).join("")}</div>`;
+      content = `<div class="clip-grid-shell"><div class="clip-grid">${socialState.savedClips.map(renderSavedClip).join("")}</div></div>`;
     } else {
       content = `
         <div class="panel empty-state">
@@ -2524,6 +2673,7 @@
     if (!socialState.loaded && !socialState.loading && !socialState.error) {
       window.queueMicrotask(loadSocialCollections);
     }
+    bindClipThumbnailErrors();
   }
 
   function renderSearchResult(user) {
@@ -2788,13 +2938,11 @@
 
   function renderProfileClip(clip, options) {
     const renderOptions = options || {};
-    const streamUrl = getSafeMediaUrl(clip.streamUrl, `/iosclips/${clip.id}/stream`);
-    const posterUrl = getSafeMediaUrl(clip.thumbnailUrl);
     const creator = creatorCache.get(String(clip.iosUserId)) || null;
     const creatorName = (creator && creator.username) || clip.creatorName || "Voxxly creator";
     return `
       <article class="profile-clip">
-        <video controls playsinline preload="metadata" src="${escapeHtml(streamUrl)}" ${posterUrl ? `poster="${escapeHtml(posterUrl)}"` : ""} aria-label="Play ${escapeHtml(clip.name || "soundbite")}"></video>
+        ${renderClipThumbnail(clip)}
         <div class="profile-clip-copy">
           ${renderOptions.showCreator ? `<a class="clip-creator-link" href="${escapeHtml(getProfileRoute(clip.iosUserId))}">@${escapeHtml(creatorName)}</a>` : ""}
           <h3 title="${escapeHtml(clip.name || "Untitled soundbite")}">${escapeHtml(clip.name || "Untitled soundbite")}</h3>
@@ -2857,9 +3005,9 @@
         </div>
       `;
     } else if (activeCollection.length) {
-      clipsMarkup = `<div class="clip-grid">${activeCollection.map(function (clip) {
+      clipsMarkup = `<div class="clip-grid-shell"><div class="clip-grid">${activeCollection.map(function (clip) {
         return renderProfileClip(clip, { showCreator: state.activeTab === "reposts" });
-      }).join("")}</div>`;
+      }).join("")}</div></div>`;
     } else {
       const emptyTitle = state.activeTab === "reposts" ? "No reposts yet." : "No posts yet.";
       const emptyCopy = state.activeTab === "reposts"
@@ -2923,6 +3071,7 @@
     if (!profileState.loaded && !profileState.loading && !profileState.error) {
       window.queueMicrotask(loadProfile);
     }
+    bindClipThumbnailErrors();
   }
 
   async function loadProfile() {
@@ -2969,9 +3118,9 @@
         return;
       }
       state.user = { id: results[0].id, username: results[0].username, profilePhotoUrl: results[0].profilePhotoUrl };
-      state.clips = results[1];
+      state.clips = normalizeClipList(results[1]);
       if (state.repostsVersion === repostsVersion) {
-        state.reposts = results[2];
+        state.reposts = normalizeClipList(results[2]);
       }
       state.counts = results[3];
       state.followStateKnown = String(targetUserId) === String(viewerId) || Boolean(results[4] && typeof results[4].following === "boolean");

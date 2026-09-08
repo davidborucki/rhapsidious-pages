@@ -1616,6 +1616,7 @@ h1[tabindex="-1"]:focus {
 
 .profile-stats {
   min-width: 260px;
+  overflow: hidden;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   border: 1px solid var(--line);
@@ -1633,6 +1634,10 @@ h1[tabindex="-1"]:focus {
 
 a.profile-stat:hover {
   background: rgba(255, 255, 255, 0.06);
+}
+
+a.profile-stat:focus-visible {
+  outline-offset: -4px;
 }
 
 .profile-stat + .profile-stat {

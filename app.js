@@ -3277,7 +3277,10 @@
     const update = function () {
       const validName = window.ProfileEditor.isValidName(nameInput.value);
       nameInput.setAttribute("aria-invalid", String(!validName));
-      dialog.querySelector("#editNameStatus").textContent = validName ? "Valid name" : "Enter a name";
+      const nameLength = Array.from(nameInput.value).length;
+      const nameStatus = dialog.querySelector("#editNameStatus");
+      nameStatus.textContent = (nameInput.value.trim() ? "" : "Enter a name · ") + nameLength + "/32 character limit";
+      nameStatus.classList.toggle("is-over-limit", nameLength > 32);
       apply.disabled = busy || preparing || !validName || !["available", "unchanged"].includes(availability);
       apply.textContent = busy ? "Applying…" : "Apply";
       input.disabled = nameInput.disabled = photoInput.disabled = busy;

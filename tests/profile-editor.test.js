@@ -17,9 +17,13 @@ test("unchanged Apply dismisses before reaching any backend request", () => {
   assert.match(submit.slice(submit.indexOf(guard)), /\{\s*dialog\.dismiss\(\);\s*return;/);
 });
 
-test("names accept any nonblank text", () => {
+test("names accept nonblank text up to 32 characters", () => {
   for (const value of ["Dave", "Dave B", "名字", "🎵", "a", "hello!? 123"]) assert.equal(isValidName(value), true);
   for (const value of ["", "  ", "\n\t"]) assert.equal(isValidName(value), false);
+  assert.equal(isValidName("a".repeat(32)), true);
+  assert.equal(isValidName("a".repeat(33)), false);
+  assert.equal(isValidName("🎵".repeat(32)), true);
+  assert.equal(isValidName("🎵".repeat(33)), false);
 });
 
 test("username status copy matches the editor's four outcomes", async () => {

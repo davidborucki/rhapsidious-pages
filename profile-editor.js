@@ -28,7 +28,7 @@
       cancel: function () { ++revision; clearTimeout(timer); }
     };
   }
-  function isValidName(value) { return Boolean(value.trim()); }
+  function isValidName(value) { return Boolean(value.trim()) && Array.from(value).length <= 32; }
   const api = { createUsernameChecker: createUsernameChecker, isValidName: isValidName };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.ProfileEditor = api;

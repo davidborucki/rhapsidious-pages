@@ -2620,6 +2620,7 @@ html.clip-viewer-open body {
 .profile-editor-form p { margin: 0; font-size: .875rem; }
 .profile-editor-form #editProfileError { color: #FF453A; }
 .profile-editor-form #editUsernameStatus.is-taken { color: #FF453A; font-weight: 700; }
+.profile-editor-form #editNameStatus.is-over-limit { color: #FF453A; font-weight: 700; }
 .profile-editor-form #applyProfile { margin-top: 16px; }
 .profile-editor-form #applyProfile:disabled { background: #38383e; color: #999; box-shadow: none; cursor: not-allowed; }
 .profile-photo-picker { align-self: flex-start; cursor: pointer; margin-bottom: 12px; }

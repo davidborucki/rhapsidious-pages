@@ -2135,10 +2135,9 @@
     const readyCount = uploadState.items.filter(function (item) { return !item.uploaded; }).length;
 
     app.innerHTML = `
-      <section class="page-wrap" aria-labelledby="uploadTitle">
+      <section class="page-wrap upload-page" aria-labelledby="uploadTitle">
         <header class="page-header">
-          <h1 id="uploadTitle" class="page-title">Upload once.<br />Or all at once.</h1>
-          <p class="page-description">Choose one clip or build a full queue. Voxxly uploads each file safely in order and follows its processing progress.</p>
+          <h1 id="uploadTitle" class="page-title">Upload</h1>
         </header>
         <div class="upload-layout">
           <aside class="panel upload-settings">

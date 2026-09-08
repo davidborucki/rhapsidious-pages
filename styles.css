@@ -567,7 +567,8 @@ input:disabled {
   gap: 18px;
 }
 
-.saved-page {
+.saved-page,
+.upload-page {
   padding-top: calc(var(--header-height) + 24px);
 }
 
@@ -575,7 +576,8 @@ input:disabled {
   padding-top: calc(var(--header-height) + 24px);
 }
 
-.saved-page .page-title {
+.saved-page .page-title,
+.upload-page .page-title {
   font-size: clamp(2rem, 4.2vw, 3.75rem);
 }
 
@@ -2135,6 +2137,7 @@ a.profile-stat:hover {
   }
 
   .saved-page,
+  .upload-page,
   .profile-page {
     padding-top: calc(var(--header-height) + 16px);
   }

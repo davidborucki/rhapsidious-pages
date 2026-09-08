@@ -61,7 +61,7 @@ test("full-screen video may use only the validated thumbnail as its poster", fun
 test("grid CSS restricts layouts to three and four portrait columns", function () {
   const css = fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8");
   assert.match(css, /\.clip-grid\s*{[^}]*repeat\(3,/s);
-  assert.match(css, /@container clip-grid \(min-width: 1120px\)\s*{\s*\.clip-grid\s*{[^}]*repeat\(4,/s);
+  assert.match(css, /@container clip-grid \(min-width: 1060px\)\s*{\s*\.clip-grid\s*{[^}]*repeat\(4,/s);
   assert.match(css, /\.profile-clip\s*{[^}]*aspect-ratio:\s*9\s*\/\s*16/s);
   assert.doesNotMatch(css, /\.clip-grid\s*{[^}]*repeat\((?:1|2|5|6),/s);
 });

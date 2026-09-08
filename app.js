@@ -985,25 +985,7 @@
             ${posterUrl ? `poster="${escapeHtml(posterUrl)}"` : ""}
             aria-label="Turn sound on for ${escapeHtml(item.name || "soundbite")}">
           </video>
-          <div class="feed-volume-control" data-feed-volume-control>
-            <button class="feed-mute-toggle" type="button" data-feed-mute-toggle aria-label="Mute ${escapeHtml(item.name || "soundbite")}" aria-pressed="false">
-              <svg class="feed-volume-icon feed-volume-icon-high" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
-              </svg>
-              <svg class="feed-volume-icon feed-volume-icon-low" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-              </svg>
-              <svg class="feed-volume-icon feed-volume-icon-muted" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
-                <path d="m22 9-6 6"></path>
-                <path d="m16 9 6 6"></path>
-              </svg>
-            </button>
-            <input class="feed-volume-slider" data-feed-volume-slider type="range" min="0" max="100" step="1" value="${Math.round(feedVolume * 100)}" aria-label="Volume for ${escapeHtml(item.name || "soundbite")}">
-          </div>
+          ${renderVideoVolumeControl(item.name)}
           ${item.isMature || item.mature
             ? `<div class="soundbite-labels"><span class="badge badge-warning">Mature${item.minimumAge ? ` · ${escapeHtml(item.minimumAge)}+` : ""}</span></div>`
             : ""}
@@ -1650,6 +1632,30 @@
     }
   }
 
+  function renderVideoVolumeControl(name) {
+    return `
+          <div class="feed-volume-control" data-feed-volume-control>
+            <button class="feed-mute-toggle" type="button" data-feed-mute-toggle aria-label="Mute ${escapeHtml(name || "soundbite")}" aria-pressed="false">
+              <svg class="feed-volume-icon feed-volume-icon-high" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+              </svg>
+              <svg class="feed-volume-icon feed-volume-icon-low" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+              </svg>
+              <svg class="feed-volume-icon feed-volume-icon-muted" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
+                <path d="m22 9-6 6"></path>
+                <path d="m16 9 6 6"></path>
+              </svg>
+            </button>
+            <input class="feed-volume-slider" data-feed-volume-slider type="range" min="0" max="100" step="1" value="${Math.round(feedVolume * 100)}" aria-label="Volume for ${escapeHtml(name || "soundbite")}">
+          </div>
+    `;
+  }
+
   function updateFeedVolumeControl(card, video) {
     const control = card && card.querySelector("[data-feed-volume-control]");
     const button = control && control.querySelector("[data-feed-mute-toggle]");
@@ -1664,6 +1670,7 @@
     control.classList.toggle("is-volume-low", !isMuted && video.volume <= 0.5);
     button.setAttribute("aria-pressed", String(isMuted));
     button.setAttribute("aria-label", `${isMuted ? "Unmute" : "Mute"} ${title}`);
+    slider.setAttribute("aria-label", `Volume for ${title}`);
     slider.value = String(isMuted ? 0 : Math.round(video.volume * 100));
   }
 
@@ -1677,6 +1684,15 @@
       video.muted = !feedAudioEnabled;
       updateFeedVolumeControl(card, video);
     });
+    if (clipViewerState) {
+      const overlay = clipViewerState.overlay;
+      const video = overlay.querySelector("[data-clip-viewer-video]");
+      if (video) {
+        video.volume = feedVolume;
+        video.muted = !feedAudioEnabled;
+        updateFeedVolumeControl(overlay, video);
+      }
+    }
   }
 
   function bindFeedVolumeControl(card, video) {
@@ -2669,6 +2685,8 @@
       video.removeAttribute("poster");
     }
     video.setAttribute("aria-label", `Pause ${clipName}`);
+    video.setAttribute("data-clip-title", clipName);
+    applyFeedAudioState();
     title.textContent = clipName;
     creatorLink.href = getProfileRoute(clip.iosUserId);
     creatorLink.setAttribute("aria-label", `View @${creatorName} profile`);
@@ -2738,6 +2756,9 @@
       return;
     }
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      if (event.target.closest && event.target.closest("[data-feed-volume-control]")) {
+        return;
+      }
       event.preventDefault();
       moveClipViewer(event.key === "ArrowLeft" ? -1 : 1);
       return;
@@ -2745,7 +2766,7 @@
     if (event.key !== "Tab") {
       return;
     }
-    const focusable = Array.from(clipViewerState.overlay.querySelectorAll("button:not([hidden]):not(:disabled), a[href], video")).filter(function (element) {
+    const focusable = Array.from(clipViewerState.overlay.querySelectorAll("button:not([hidden]):not(:disabled), input:not(:disabled), a[href], video")).filter(function (element) {
       return element.getClientRects().length > 0;
     });
     if (!focusable.length) {
@@ -2787,6 +2808,7 @@
       </button>
       <section class="clip-viewer-dialog">
         <video class="clip-viewer-video" data-clip-viewer-video playsinline loop preload="metadata" tabindex="0" role="button"></video>
+        ${renderVideoVolumeControl(selectedClip.name)}
         <span class="clip-viewer-play-indicator" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"></path></svg>
         </span>
@@ -2818,6 +2840,10 @@
     overlay.querySelector("[data-clip-viewer-previous]").addEventListener("click", function () { moveClipViewer(-1); });
     overlay.querySelector("[data-clip-viewer-next]").addEventListener("click", function () { moveClipViewer(1); });
     const viewerVideo = overlay.querySelector("[data-clip-viewer-video]");
+    bindFeedVolumeControl(overlay, viewerVideo);
+    viewerVideo.addEventListener("volumechange", function () {
+      updateFeedVolumeControl(overlay, viewerVideo);
+    });
     viewerVideo.addEventListener("click", toggleClipViewerPlayback);
     viewerVideo.addEventListener("play", updateClipViewerPlaybackState);
     viewerVideo.addEventListener("pause", updateClipViewerPlaybackState);

@@ -2,7 +2,41 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createUsernameChecker } = require("../profile-editor.js");
+const { isValidName } = require("../profile-editor.js");
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test("unchanged Apply dismisses before reaching any backend request", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const source = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+  const start = source.indexOf('dialog.querySelector("form").addEventListener("submit"');
+  const submit = source.slice(start, source.indexOf("dialog.showModal()", start));
+  const guard = 'if (nameInput.value.trim() === originalName && input.value.trim() === original && !photo)';
+  assert.ok(submit.indexOf(guard) >= 0);
+  assert.ok(submit.indexOf(guard) < submit.indexOf("await requestJson"));
+  assert.match(submit.slice(submit.indexOf(guard)), /\{\s*dialog\.dismiss\(\);\s*return;/);
+});
+
+test("names accept any nonblank text", () => {
+  for (const value of ["Dave", "Dave B", "名字", "🎵", "a", "hello!? 123"]) assert.equal(isValidName(value), true);
+  for (const value of ["", "  ", "\n\t"]) assert.equal(isValidName(value), false);
+});
+
+test("username status copy matches the editor's four outcomes", async () => {
+  let message;
+  const checker = createUsernameChecker("dave", async name => ({ exists: name === "taken" }), (_, text) => { message = text; });
+  checker.check("");
+  assert.match(message, /^Use 3–32 letters/);
+  checker.check("dave");
+  assert.equal(message, "Current username");
+  checker.check("taken");
+  await delay(340);
+  assert.equal(message, "Username already taken");
+  checker.check("newname");
+  await delay(340);
+  assert.equal(message, "Username is available");
+  checker.cancel();
+});
 
 test("current legacy username is allowed without an availability request", () => {
   let state;

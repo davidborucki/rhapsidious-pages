@@ -983,7 +983,7 @@
             preload="metadata"
             src="${escapeHtml(streamUrl)}"
             ${posterUrl ? `poster="${escapeHtml(posterUrl)}"` : ""}
-            aria-label="Turn sound on for ${escapeHtml(item.name || "soundbite")}">
+            aria-label="Play ${escapeHtml(item.name || "soundbite")}">
           </video>
           <span class="feed-play-indicator" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="m6.5 5 11 7-11 7V5Z"></path></svg>
@@ -1624,7 +1624,7 @@
   }
 
   function enableFeedAudio() {
-    feedAudioEnabled = true;
+    // Retry playback after a gesture while preserving the user's audio preference.
     applyFeedAudioState();
     const video = app.querySelector("[data-feed-video]");
     if (!video) {
@@ -1988,19 +1988,10 @@
       const updatePlaybackLabel = function () {
         const title = video.getAttribute("data-clip-title") || "soundbite";
         card.querySelector(".soundbite-media").classList.toggle("is-paused", video.paused);
-        video.setAttribute("aria-label", video.muted ? `Turn sound on for ${title}` : `${video.paused ? "Play" : "Pause"} ${title}`);
+        video.setAttribute("aria-label", `${video.paused ? "Play" : "Pause"} ${title}`);
         updateFeedVolumeControl(card, video);
       };
       const togglePlayback = function () {
-        if (video.muted) {
-          feedAudioEnabled = true;
-          video.muted = false;
-          if (video.paused) {
-            video.play().catch(function () {});
-          }
-          updatePlaybackLabel();
-          return;
-        }
         if (video.paused) {
           video.play().catch(function () {});
         } else {

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxxly clip viewer fixture</title>
+    <link rel="stylesheet" href="../styles.css">
+  </head>
+  <body>
+    <header class="site-header"><div class="header-inner"><a id="brandLink" class="brand" href="#/feed">Voxxly</a><div class="header-actions"><nav id="guestNav"></nav><a id="accountLink" class="hidden" href="#/profile"></a><button id="logoutButton" class="hidden" type="button">Log out</button></div></div></header>
+    <nav id="primaryNav" class="primary-nav hidden" aria-label="Primary navigation">
+      <a class="nav-link" data-route="#/feed" href="#/feed">Soundbytes</a>
+      <a id="searchNavLink" class="nav-link" data-route="#/search" href="#/search">Search</a>
+      <a class="nav-link" data-route="#/saved" href="#/saved">Saved</a>
+      <a class="nav-link" data-route="#/upload" href="#/upload">Upload</a>
+      <a class="nav-link" data-route="#/profile" href="#/profile">Profile</a>
+    </nav>
+    <main id="app" class="app-shell"></main>
+    <aside id="searchDrawer" aria-hidden="true" inert><div id="searchDrawerContent"></div></aside>
+    <div id="toastRegion"></div>
+    <script>
+      window.APP_CONFIG = {
+        auth: { accessTokenStorageKey: "clip_viewer_fixture_token", mePath: "/auth/me" },
+        profile: {
+          clipsPathTemplate: "/ios/users/{userId}/clips",
+          repostedClipsPathTemplate: "/ios/users/{userId}/reposted-clips",
+          followCountsPathTemplate: "/ios/users/{userId}/follow-counts"
+        }
+      };
+      localStorage.setItem("clip_viewer_fixture_token", "fixture-token");
+      const fixtureClips = [
+        { id: 101, iosUserId: 1, name: "First fixture clip", streamUrl: "/tests/missing-video-1.mp4", thumbnailUrl: null },
+        { id: 102, iosUserId: 1, name: "Second fixture clip", streamUrl: "/tests/missing-video-2.mp4", thumbnailUrl: null }
+      ];
+      window.fetch = async function (input) {
+        const pathname = new URL(String(input), location.origin).pathname;
+        let payload = null;
+        if (pathname === "/auth/me") payload = { id: 1, username: "fixture", profilePhotoUrl: null };
+        else if (pathname === "/ios/users/1/clips") payload = fixtureClips;
+        else if (pathname === "/ios/users/1/saved-clips") payload = fixtureClips;
+        else if (pathname === "/ios/users/1/reposted-clips") payload = [];
+        else if (pathname === "/ios/users/1/follow-counts") payload = { followerCount: 0, followingCount: 0 };
+        else return new Response(JSON.stringify({ message: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+      };
+      location.hash = "#/profile";
+    </script>
+    <script src="../clip-utils.js"></script>
+    <script src="../app.js"></script>
+  </body>
+</html>

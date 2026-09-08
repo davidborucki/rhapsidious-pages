@@ -70,6 +70,7 @@
   let creatorCache = new Map();
   let feedWatchRecords = new Map();
   let failedThumbnailUrls = new Set();
+  let clipViewerState = null;
 
   function createFeedState(sharedClipId) {
     return {
@@ -2572,7 +2573,7 @@
     const clipName = (clip && clip.name) || "Untitled soundbite";
     const clipId = clip && clip.id != null ? clip.id : "";
     return `
-      <a class="clip-thumbnail-link" href="${routes.feed}?clip=${encodeURIComponent(clipId)}" aria-label="Play ${escapeHtml(clipName)}">
+      <a class="clip-thumbnail-link" data-view-clip="${escapeHtml(clipId)}" href="${routes.feed}?clip=${encodeURIComponent(clipId)}" aria-label="Play ${escapeHtml(clipName)}">
         <span class="clip-thumbnail-placeholder" aria-hidden="true"><span>V</span></span>
         ${usableThumbnailUrl ? `<img class="clip-thumbnail-image" data-clip-thumbnail-image data-thumbnail-url="${escapeHtml(usableThumbnailUrl)}" src="${escapeHtml(usableThumbnailUrl)}" width="540" height="960" loading="lazy" decoding="async" alt="">` : ""}
       </a>
@@ -2605,6 +2606,202 @@
       if (image.complete && image.naturalWidth === 0) {
         handleThumbnailError();
       }
+    });
+  }
+
+  function setClipViewerPageInert(isInert) {
+    [app, primaryNav, document.querySelector(".site-header")].forEach(function (element) {
+      if (element) {
+        element.inert = Boolean(isInert);
+      }
+    });
+  }
+
+  function closeClipViewer(options) {
+    if (!clipViewerState) {
+      return;
+    }
+    const closeOptions = options || {};
+    const state = clipViewerState;
+    clipViewerState = null;
+    document.removeEventListener("keydown", handleClipViewerKeydown);
+    const video = state.overlay.querySelector("[data-clip-viewer-video]");
+    if (video) {
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    }
+    state.overlay.remove();
+    document.documentElement.classList.remove("clip-viewer-open");
+    setClipViewerPageInert(false);
+    if (closeOptions.restoreFocus !== false && state.previousFocus && state.previousFocus.isConnected) {
+      state.previousFocus.focus({ preventScroll: true });
+    }
+  }
+
+  function updateClipViewer() {
+    if (!clipViewerState) {
+      return;
+    }
+    const state = clipViewerState;
+    const clip = state.clips[state.index];
+    if (!clip) {
+      closeClipViewer();
+      return;
+    }
+
+    const video = state.overlay.querySelector("[data-clip-viewer-video]");
+    const title = state.overlay.querySelector("[data-clip-viewer-title]");
+    const creatorLink = state.overlay.querySelector("[data-clip-viewer-creator]");
+    const position = state.overlay.querySelector("[data-clip-viewer-position]");
+    const previousButton = state.overlay.querySelector("[data-clip-viewer-previous]");
+    const nextButton = state.overlay.querySelector("[data-clip-viewer-next]");
+    const creator = creatorCache.get(String(clip.iosUserId)) || (profileState.user && String(profileState.user.id) === String(clip.iosUserId) ? profileState.user : null);
+    const creatorName = (creator && creator.username) || clip.creatorName || "Voxxly creator";
+    const clipName = clip.name || "Untitled soundbite";
+    const streamUrl = getSafeMediaUrl(clip.streamUrl, `/iosclips/${clip.id}/stream`);
+    const posterUrl = getAbsoluteThumbnailUrl(clip.thumbnailUrl);
+
+    video.pause();
+    video.src = streamUrl;
+    if (posterUrl) {
+      video.poster = posterUrl;
+    } else {
+      video.removeAttribute("poster");
+    }
+    video.setAttribute("aria-label", `Play ${clipName}`);
+    title.textContent = clipName;
+    creatorLink.href = getProfileRoute(clip.iosUserId);
+    creatorLink.setAttribute("aria-label", `View @${creatorName} profile`);
+    creatorLink.innerHTML = `${avatarMarkup(creator, creatorName, "clip-viewer-avatar")}<span>@${escapeHtml(creatorName)}</span>`;
+    position.textContent = `${state.index + 1} of ${state.clips.length}`;
+    previousButton.hidden = state.index === 0;
+    previousButton.disabled = state.index === 0;
+    nextButton.hidden = state.index === state.clips.length - 1;
+    nextButton.disabled = state.index === state.clips.length - 1;
+    video.load();
+    video.play().catch(function () {});
+  }
+
+  function moveClipViewer(direction) {
+    if (!clipViewerState) {
+      return;
+    }
+    const nextIndex = clipViewerState.index + direction;
+    if (nextIndex < 0 || nextIndex >= clipViewerState.clips.length) {
+      return;
+    }
+    clipViewerState.index = nextIndex;
+    updateClipViewer();
+  }
+
+  function handleClipViewerKeydown(event) {
+    if (!clipViewerState) {
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeClipViewer();
+      return;
+    }
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      moveClipViewer(event.key === "ArrowLeft" ? -1 : 1);
+      return;
+    }
+    if (event.key !== "Tab") {
+      return;
+    }
+    const focusable = Array.from(clipViewerState.overlay.querySelectorAll("button:not([hidden]):not(:disabled), a[href], video")).filter(function (element) {
+      return element.getClientRects().length > 0;
+    });
+    if (!focusable.length) {
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function openClipViewer(clips, startIndex, trigger) {
+    const sourceClips = Array.isArray(clips) ? clips : [];
+    const availableClips = sourceClips.filter(function (clip) { return clip && clip.id != null; });
+    const selectedClip = sourceClips[startIndex];
+    const selectedIndex = availableClips.findIndex(function (clip) { return selectedClip && String(clip.id) === String(selectedClip.id); });
+    if (!availableClips.length || selectedIndex < 0) {
+      return;
+    }
+    if (searchDrawerOpen) {
+      closeSearchDrawer();
+    }
+    closeClipViewer({ restoreFocus: false });
+
+    const overlay = document.createElement("div");
+    overlay.className = "clip-viewer-backdrop";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-labelledby", "clipViewerTitle");
+    overlay.innerHTML = `
+      <button class="clip-viewer-close" type="button" data-clip-viewer-close aria-label="Close clip viewer"></button>
+      <button class="clip-viewer-arrow clip-viewer-arrow-previous" type="button" data-clip-viewer-previous aria-label="Previous clip">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+      </button>
+      <section class="clip-viewer-dialog">
+        <video class="clip-viewer-video" data-clip-viewer-video controls playsinline loop preload="metadata"></video>
+        <div class="clip-viewer-copy">
+          <a class="clip-viewer-creator" data-clip-viewer-creator href="#"></a>
+          <h2 id="clipViewerTitle" data-clip-viewer-title></h2>
+          <span class="clip-viewer-position" data-clip-viewer-position></span>
+        </div>
+      </section>
+      <button class="clip-viewer-arrow clip-viewer-arrow-next" type="button" data-clip-viewer-next aria-label="Next clip">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
+      </button>
+    `;
+    document.body.appendChild(overlay);
+    clipViewerState = {
+      clips: availableClips,
+      index: selectedIndex,
+      overlay: overlay,
+      previousFocus: trigger || document.activeElement
+    };
+    document.documentElement.classList.add("clip-viewer-open");
+    setClipViewerPageInert(true);
+
+    overlay.addEventListener("click", function (event) {
+      if (event.target === overlay) {
+        closeClipViewer();
+      }
+    });
+    overlay.querySelector("[data-clip-viewer-close]").addEventListener("click", function () { closeClipViewer(); });
+    overlay.querySelector("[data-clip-viewer-previous]").addEventListener("click", function () { moveClipViewer(-1); });
+    overlay.querySelector("[data-clip-viewer-next]").addEventListener("click", function () { moveClipViewer(1); });
+    document.addEventListener("keydown", handleClipViewerKeydown);
+    updateClipViewer();
+    overlay.querySelector("[data-clip-viewer-close]").focus({ preventScroll: true });
+  }
+
+  function bindClipViewerLinks(clips) {
+    app.querySelectorAll("[data-view-clip]").forEach(function (link) {
+      link.addEventListener("click", function (event) {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+          return;
+        }
+        const clipId = link.getAttribute("data-view-clip");
+        const index = clips.findIndex(function (clip) { return clip && String(clip.id) === String(clipId); });
+        if (index < 0) {
+          return;
+        }
+        event.preventDefault();
+        openClipViewer(clips, index, link);
+      });
     });
   }
 
@@ -2672,6 +2869,7 @@
       window.queueMicrotask(loadSocialCollections);
     }
     bindClipThumbnailErrors();
+    bindClipViewerLinks(socialState.savedClips);
   }
 
   function renderSearchResult(user) {
@@ -3070,6 +3268,7 @@
       window.queueMicrotask(loadProfile);
     }
     bindClipThumbnailErrors();
+    bindClipViewerLinks(activeCollection);
   }
 
   async function loadProfile() {
@@ -3303,6 +3502,7 @@
   }
 
   function render() {
+    closeClipViewer({ restoreFocus: false });
     let route = getRoute();
     if (!route) {
       navigate(currentUser ? routes.feed : routes.login);

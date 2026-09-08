@@ -2596,7 +2596,11 @@ html.clip-viewer-open body {
 }
 
 .profile-name-row .profile-name { min-width: 0; }
-.profile-name-row .secondary-button { flex-shrink: 0; }
+.profile-name-row .secondary-button {
+  flex-shrink: 0;
+  /* Align to the visible letters, accounting for the heading's descender space. */
+  margin-bottom: clamp(0.24rem, 0.55vw, 0.5rem);
+}
 
 .profile-editor {
   width: min(480px, calc(100vw - 32px));

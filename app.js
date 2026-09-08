@@ -2653,7 +2653,6 @@
     const video = state.overlay.querySelector("[data-clip-viewer-video]");
     const title = state.overlay.querySelector("[data-clip-viewer-title]");
     const creatorLink = state.overlay.querySelector("[data-clip-viewer-creator]");
-    const position = state.overlay.querySelector("[data-clip-viewer-position]");
     const previousButton = state.overlay.querySelector("[data-clip-viewer-previous]");
     const nextButton = state.overlay.querySelector("[data-clip-viewer-next]");
     const creator = creatorCache.get(String(clip.iosUserId)) || (profileState.user && String(profileState.user.id) === String(clip.iosUserId) ? profileState.user : null);
@@ -2669,18 +2668,51 @@
     } else {
       video.removeAttribute("poster");
     }
-    video.setAttribute("aria-label", `Play ${clipName}`);
+    video.setAttribute("aria-label", `Pause ${clipName}`);
     title.textContent = clipName;
     creatorLink.href = getProfileRoute(clip.iosUserId);
     creatorLink.setAttribute("aria-label", `View @${creatorName} profile`);
     creatorLink.innerHTML = `${avatarMarkup(creator, creatorName, "clip-viewer-avatar")}<span>@${escapeHtml(creatorName)}</span>`;
-    position.textContent = `${state.index + 1} of ${state.clips.length}`;
     previousButton.hidden = state.index === 0;
     previousButton.disabled = state.index === 0;
     nextButton.hidden = state.index === state.clips.length - 1;
     nextButton.disabled = state.index === state.clips.length - 1;
     video.load();
-    video.play().catch(function () {});
+    video.play().catch(function () {
+      updateClipViewerPlaybackState();
+    });
+  }
+
+  function updateClipViewerPlaybackState() {
+    if (!clipViewerState) {
+      return;
+    }
+    const video = clipViewerState.overlay.querySelector("[data-clip-viewer-video]");
+    const dialog = clipViewerState.overlay.querySelector(".clip-viewer-dialog");
+    if (!video || !dialog) {
+      return;
+    }
+    const clip = clipViewerState.clips[clipViewerState.index];
+    const clipName = (clip && clip.name) || "soundbite";
+    dialog.classList.toggle("is-paused", video.paused);
+    video.setAttribute("aria-label", `${video.paused ? "Play" : "Pause"} ${clipName}`);
+  }
+
+  function toggleClipViewerPlayback() {
+    if (!clipViewerState) {
+      return;
+    }
+    const video = clipViewerState.overlay.querySelector("[data-clip-viewer-video]");
+    if (!video) {
+      return;
+    }
+    if (video.paused) {
+      video.play().catch(function () {
+        updateClipViewerPlaybackState();
+      });
+    } else {
+      video.pause();
+    }
   }
 
   function moveClipViewer(direction) {
@@ -2754,11 +2786,13 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
       </button>
       <section class="clip-viewer-dialog">
-        <video class="clip-viewer-video" data-clip-viewer-video controls playsinline loop preload="metadata"></video>
+        <video class="clip-viewer-video" data-clip-viewer-video playsinline loop preload="metadata" tabindex="0" role="button"></video>
+        <span class="clip-viewer-play-indicator" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"></path></svg>
+        </span>
         <div class="clip-viewer-copy">
           <a class="clip-viewer-creator" data-clip-viewer-creator href="#"></a>
           <h2 id="clipViewerTitle" data-clip-viewer-title></h2>
-          <span class="clip-viewer-position" data-clip-viewer-position></span>
         </div>
       </section>
       <button class="clip-viewer-arrow clip-viewer-arrow-next" type="button" data-clip-viewer-next aria-label="Next clip">
@@ -2783,6 +2817,16 @@
     overlay.querySelector("[data-clip-viewer-close]").addEventListener("click", function () { closeClipViewer(); });
     overlay.querySelector("[data-clip-viewer-previous]").addEventListener("click", function () { moveClipViewer(-1); });
     overlay.querySelector("[data-clip-viewer-next]").addEventListener("click", function () { moveClipViewer(1); });
+    const viewerVideo = overlay.querySelector("[data-clip-viewer-video]");
+    viewerVideo.addEventListener("click", toggleClipViewerPlayback);
+    viewerVideo.addEventListener("play", updateClipViewerPlaybackState);
+    viewerVideo.addEventListener("pause", updateClipViewerPlaybackState);
+    viewerVideo.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggleClipViewerPlayback();
+      }
+    });
     document.addEventListener("keydown", handleClipViewerKeydown);
     updateClipViewer();
     overlay.querySelector("[data-clip-viewer-close]").focus({ preventScroll: true });

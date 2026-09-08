@@ -1841,13 +1841,49 @@ html.clip-viewer-open body {
   object-fit: contain;
   object-position: center;
   background: #000;
+  cursor: pointer;
+}
+
+.clip-viewer-video::-webkit-media-controls {
+  display: none !important;
+}
+
+.clip-viewer-play-indicator {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  width: 70px;
+  height: 70px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  background: rgba(10, 10, 14, 0.62);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.9);
+  transition: opacity 140ms ease, transform 140ms ease;
+  pointer-events: none;
+}
+
+.clip-viewer-dialog.is-paused .clip-viewer-play-indicator {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.clip-viewer-play-indicator svg {
+  width: 32px;
+  height: 32px;
+  margin-left: 4px;
+  fill: currentColor;
 }
 
 .clip-viewer-copy {
   position: absolute;
   z-index: 2;
   right: 18px;
-  bottom: 58px;
+  bottom: 20px;
   left: 18px;
   pointer-events: none;
 }
@@ -1888,15 +1924,6 @@ html.clip-viewer-open body {
   text-overflow: ellipsis;
   white-space: nowrap;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.85);
-}
-
-.clip-viewer-position {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  color: rgba(255, 255, 255, 0.75);
-  font-size: 0.75rem;
-  font-weight: 700;
 }
 
 .clip-viewer-close,

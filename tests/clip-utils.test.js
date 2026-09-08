@@ -41,6 +41,9 @@ test("grid markup uses lazy images and never embeds video players", function () 
 
 test("profile and saved grids open an accessible keyboard-controlled clip viewer", function () {
   const appSource = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+  const viewerStart = appSource.indexOf("function openClipViewer");
+  const viewerEnd = appSource.indexOf("function bindClipViewerLinks", viewerStart);
+  const viewer = appSource.slice(viewerStart, viewerEnd);
   assert.match(appSource, /function openClipViewer/);
   assert.match(appSource, /aria-modal/);
   assert.match(appSource, /event\.target === overlay/);
@@ -48,6 +51,8 @@ test("profile and saved grids open an accessible keyboard-controlled clip viewer
   assert.match(appSource, /event\.key === "ArrowLeft" \|\| event\.key === "ArrowRight"/);
   assert.match(appSource, /bindClipViewerLinks\(socialState\.savedClips\)/);
   assert.match(appSource, /bindClipViewerLinks\(activeCollection\)/);
+  assert.doesNotMatch(viewer, /<video[^>]*\scontrols(?:\s|>)/);
+  assert.match(viewer, /<video[^>]*tabindex="0"[^>]*role="button"/);
 });
 
 test("failed thumbnail requests stop retrying and reveal the placeholder", function () {

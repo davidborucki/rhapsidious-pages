@@ -627,6 +627,7 @@
   }
 
   function resetUserData() {
+    closeProfileEditor();
     sessionGeneration += 1;
     searchDrawerOpen = false;
     searchDrawer.classList.remove("is-open");
@@ -3212,6 +3213,163 @@
     `;
   }
 
+  function closeProfileEditor() {
+    const dialog = document.getElementById("profileEditor");
+    if (dialog) dialog.dismiss();
+  }
+
+  async function prepareAvatar(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1024;
+      const context = canvas.getContext("2d");
+      const side = Math.min(image.naturalWidth, image.naturalHeight);
+      context.drawImage(image, (image.naturalWidth - side) / 2, (image.naturalHeight - side) / 2, side, side, 0, 0, 1024, 1024);
+      return await new Promise(function (resolve, reject) {
+        canvas.toBlob(function (blob) { blob ? resolve(blob) : reject(new Error("Couldn’t prepare this photo.")); }, "image/jpeg", 0.9);
+      });
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  function openProfileEditor() {
+    if (!currentUser || document.getElementById("profileEditor")) return;
+    const userId = currentUser.id;
+    const generation = sessionGeneration;
+    const user = profileState.user || currentUser;
+    let original = user.username || "";
+    let photo = null;
+    let preview = "";
+    let busy = false;
+    let preparing = false;
+    let photoRevision = 0;
+    let availability = "unchanged";
+    const dialog = document.createElement("dialog");
+    dialog.id = "profileEditor";
+    dialog.className = "profile-editor";
+    dialog.setAttribute("aria-labelledby", "profileEditorTitle");
+    dialog.innerHTML = `
+      <button class="clip-viewer-close" type="button" aria-label="Close edit profile"></button>
+      <h2 id="profileEditorTitle">Edit profile</h2>
+      <form class="profile-editor-form">
+        <div id="editPhotoPreview">${avatarMarkup(user, original, "profile-avatar")}</div>
+        <label class="secondary-button profile-photo-picker">Change profile picture<input id="editPhoto" type="file" accept="image/jpeg,image/png,image/webp" class="sr-only"></label>
+        <label for="editUsername">Name / @username</label>
+        <p class="muted">Your profile name and @ currently use the same username.</p>
+        <input id="editUsername" autocomplete="username" spellcheck="false" value="${escapeHtml(original)}" aria-describedby="editUsernameStatus">
+        <p id="editUsernameStatus" class="muted" role="status" aria-live="polite">This is your current username.</p>
+        <p id="editProfileError" role="alert"></p>
+        <button class="primary-button" id="applyProfile" type="submit" disabled>Apply</button>
+      </form>`;
+    document.body.appendChild(dialog);
+    const input = dialog.querySelector("#editUsername");
+    const apply = dialog.querySelector("#applyProfile");
+    const error = dialog.querySelector("#editProfileError");
+    const photoInput = dialog.querySelector("#editPhoto");
+    const active = function () { return dialog.isConnected && generation === sessionGeneration && currentUser && String(currentUser.id) === String(userId); };
+    const update = function () {
+      apply.disabled = busy || preparing || !["available", "unchanged"].includes(availability) || (!photo && input.value.trim() === original);
+      apply.textContent = busy ? "Applying…" : "Apply";
+      input.disabled = photoInput.disabled = busy;
+      dialog.querySelector(".clip-viewer-close").disabled = busy;
+    };
+    let checker;
+    function makeChecker() {
+      return window.ProfileEditor.createUsernameChecker(original, function (username) {
+        return requestJson("/ios/check-username?username=" + encodeURIComponent(username));
+      }, function (status, message) {
+        availability = status;
+        dialog.querySelector("#editUsernameStatus").textContent = message;
+        input.setAttribute("aria-invalid", String(status === "taken" || status === "invalid"));
+        update();
+      });
+    }
+    checker = makeChecker();
+    dialog.dismiss = function () {
+      checker.cancel();
+      ++photoRevision;
+      if (preview) URL.revokeObjectURL(preview);
+      dialog.close();
+      dialog.remove();
+      const editButton = document.getElementById("editProfile");
+      if (editButton) editButton.focus();
+    };
+    dialog.querySelector(".clip-viewer-close").addEventListener("click", function () { if (!busy) dialog.dismiss(); });
+    dialog.addEventListener("cancel", function (event) { event.preventDefault(); if (!busy) dialog.dismiss(); });
+    input.addEventListener("input", function () { error.textContent = ""; checker.check(input.value); });
+    photoInput.addEventListener("change", async function () {
+      const file = photoInput.files[0];
+      if (!file) return;
+      const revision = ++photoRevision;
+      preparing = true;
+      error.textContent = "";
+      update();
+      try {
+        if (file.size > 20 * 1024 * 1024) throw new Error("Choose a photo smaller than 20 MB.");
+        const blob = await prepareAvatar(file);
+        if (!active() || revision !== photoRevision) return;
+        photo = blob;
+        if (preview) URL.revokeObjectURL(preview);
+        preview = URL.createObjectURL(blob);
+        dialog.querySelector("#editPhotoPreview").innerHTML = `<span class="avatar profile-avatar"><img src="${preview}" alt="New profile picture preview"></span>`;
+      } catch (err) {
+        if (active() && revision === photoRevision) error.textContent = err.message || "Choose a supported image.";
+      } finally {
+        if (active() && revision === photoRevision) { preparing = false; update(); }
+      }
+    });
+    function mergeUser(changes) {
+      Object.assign(currentUser, changes);
+      if (profileState.user && String(profileState.user.id) === String(userId)) Object.assign(profileState.user, changes);
+      creatorCache.clear();
+      syncShell(getRoute());
+      renderProfile();
+    }
+    dialog.querySelector("form").addEventListener("submit", async function (event) {
+      event.preventDefault();
+      if (apply.disabled || !active()) return;
+      busy = true;
+      error.textContent = "";
+      update();
+      let savedName = false;
+      try {
+        const username = input.value.trim();
+        if (username !== original) {
+          await requestJson("/ios/users/" + encodeURIComponent(userId), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: username }) });
+          if (!active()) return;
+          original = username;
+          savedName = true;
+          checker.cancel();
+          checker = makeChecker();
+          availability = "unchanged";
+          mergeUser({ username: username });
+        }
+        if (photo) {
+          const form = new FormData();
+          form.append("file", photo, "avatar.jpg");
+          const result = await requestJson("/ios/profile-photo", { method: "POST", headers: { "X-User-Id": String(userId) }, body: form });
+          if (!active()) return;
+          const photoUrl = getSafeMediaUrl(result && result.profilePhotoUrl);
+          if (!photoUrl) throw new Error("Photo uploaded, but its URL was missing. Reload your profile to check it.");
+          const refreshed = new URL(photoUrl);
+          refreshed.searchParams.set("t", String(Date.now()));
+          mergeUser({ profilePhotoUrl: refreshed.href });
+          photo = null;
+        }
+        dialog.dismiss();
+      } catch (err) {
+        if (!active()) return;
+        if (err.status === 409) availability = "taken";
+        error.textContent = (savedName ? "Username saved. Photo update failed: " : "") + (err.message || "Couldn’t update your profile. Try again.");
+      } finally { if (active()) { busy = false; update(); } }
+    });
+    dialog.showModal();
+    input.focus();
+  }
+
   function renderProfile() {
     const state = profileState;
     const targetUserId = state.userId || (currentUser && String(currentUser.id)) || "";
@@ -3289,7 +3447,7 @@
         <div class="panel profile-hero">
           ${avatarMarkup(user, user.username, "profile-avatar")}
           <div class="profile-identity">
-            <h1 id="profileTitle" class="profile-name">${escapeHtml(user.username || "Voxxly creator")}</h1>
+            <div class="profile-name-row"><h1 id="profileTitle" class="profile-name">${escapeHtml(user.username || "Voxxly creator")}</h1>${isOwnProfile ? '<button id="editProfile" class="secondary-button" type="button">Edit profile</button>' : ""}</div>
             <p class="profile-handle">@${escapeHtml(user.username || "creator")}</p>
             ${!isOwnProfile && state.loaded
               ? (state.followStateKnown
@@ -3324,6 +3482,8 @@
       });
     }
 
+    const editButton = document.getElementById("editProfile");
+    if (editButton) editButton.addEventListener("click", openProfileEditor);
     const followButton = document.getElementById("followProfile");
     if (followButton) {
       followButton.addEventListener("click", handleFollowToggle);
@@ -3566,6 +3726,7 @@
   }
 
   function render() {
+    closeProfileEditor();
     closeClipViewer({ restoreFocus: false });
     let route = getRoute();
     if (!route) {

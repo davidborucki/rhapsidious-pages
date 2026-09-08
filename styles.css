@@ -2588,3 +2588,34 @@ html.clip-viewer-open body {
     transition-duration: 0.01ms !important;
   }
 }
+.profile-name-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+
+.profile-name-row .profile-name { min-width: 0; }
+.profile-name-row .secondary-button { flex-shrink: 0; }
+
+.profile-editor {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 32px;
+  border: 1px solid rgba(255, 255, 255, .15);
+  border-radius: 24px;
+  background: #101016;
+  color: #fff;
+  overflow-y: auto;
+}
+
+.profile-editor::backdrop { background: rgba(0, 0, 0, .85); backdrop-filter: blur(12px); }
+.profile-editor h2 { margin: 0 60px 28px 0; font-size: 1.6rem; }
+.profile-editor-form { display: flex; flex-direction: column; gap: 12px; }
+.profile-editor-form p { margin: 0; font-size: .875rem; }
+.profile-editor-form #editProfileError { color: #FF453A; }
+.profile-editor-form #applyProfile { margin-top: 16px; }
+.profile-editor-form #applyProfile:disabled { background: #38383e; color: #999; box-shadow: none; cursor: not-allowed; }
+.profile-photo-picker { align-self: flex-start; cursor: pointer; margin-bottom: 12px; }
+.profile-photo-picker:focus-within { outline: 2px solid white; outline-offset: 3px; }

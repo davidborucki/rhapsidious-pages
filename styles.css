@@ -568,7 +568,8 @@ input:disabled {
 }
 
 .saved-page,
-.upload-page {
+.upload-page,
+.connections-page {
   padding-top: calc(var(--header-height) + 24px);
 }
 
@@ -577,7 +578,8 @@ input:disabled {
 }
 
 .saved-page .page-title,
-.upload-page .page-title {
+.upload-page .page-title,
+.connections-page .page-title {
   font-size: clamp(2rem, 4.2vw, 3.75rem);
 }
 
@@ -2379,7 +2381,8 @@ html.clip-viewer-open body {
 
   .saved-page,
   .upload-page,
-  .profile-page {
+  .profile-page,
+  .connections-page {
     padding-top: calc(var(--header-height) + 16px);
   }
 

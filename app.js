@@ -3477,7 +3477,6 @@
         <a class="back-link" href="${escapeHtml(getProfileRoute(state.userId))}">← Back to @${escapeHtml(ownerName)}</a>
         <header class="page-header">
           <h1 id="connectionsTitle" class="page-title">${label}</h1>
-          <p class="page-description">@${escapeHtml(ownerName)}</p>
         </header>
         ${content}
       </section>

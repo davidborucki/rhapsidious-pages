@@ -909,6 +909,10 @@ h1[tabindex="-1"]:focus {
   will-change: transform;
 }
 
+.feed-slide[hidden], .clip-viewer-video[hidden] {
+  display: none !important;
+}
+
 .feed-end-loader {
   position: absolute;
   z-index: 24;

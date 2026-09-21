@@ -66,13 +66,36 @@
   let feedNavigationCleanup = null;
   let feedNavigationLocked = false;
   let feedTransitionGeneration = 0;
+  let feedAnimationPromise = null;
+  let feedTransitionCleanup = null;
   let feedAudioEnabled = true;
   let feedVolume = 1;
   let creatorCache = new Map();
+  let creatorRequests = new Map();
+  let feedPool = null;
+  const drainingPlaybackQueues = new Set();
+  const feedRequests = new Set();
+  const playback = window.VoxxlyPlayback;
+  const usePlaybackWindow = Boolean(playback && feedConfig.playbackWindow !== false);
+  const nativeHls = Boolean(document.createElement("video").canPlayType("application/vnd.apple.mpegurl"));
+
+  function playbackSource(clip) {
+    const legacy = function (item) { return getSafeMediaUrl(item.streamUrl, `/iosclips/${item.id}/stream`); };
+    return playback ? playback.sourceFor(clip, legacy, nativeHls) : legacy(clip);
+  }
+
+  function embeddedCreator(clip) {
+    const creator = clip.creator;
+    return creator && String(creator.id) === String(clip.iosUserId) && typeof creator.username === "string" ? creator : null;
+  }
   let feedWatchRecords = new Map();
   let failedThumbnailUrls = new Set();
   let clipViewerState = null;
   let settingsCleanup = null;
+  if (feedConfig.playbackTelemetry) window.voxxlyPlaybackDiagnostics = function () {
+    const pool = clipViewerState && clipViewerState.pool || feedPool;
+    return pool ? pool.samples.slice() : [];
+  };
 
   function createFeedState(sharedClipId) {
     return {
@@ -91,7 +114,9 @@
       fetchingFromEnd: false,
       likedIds: new Set(),
       error: "",
-      sessionId: randomId("soundbites")
+      sessionId: randomId("soundbites"),
+      queue: null,
+      queueRefillRequested: false
     };
   }
 
@@ -485,7 +510,9 @@
       method: requestOptions.method || "GET",
       headers: headers,
       credentials: requestOptions.withCredentials || authConfig.withCredentials ? "include" : "same-origin",
-      body: requestOptions.body
+      body: requestOptions.body,
+      signal: requestOptions.signal,
+      cache: requestOptions.cache || "no-store"
     });
 
     const shouldRetryAuth = response.status === 401 || (response.status === 403 && requestOptions.retryForbidden !== false);
@@ -513,11 +540,14 @@
 
     const payload = await parseResponse(response);
     if (!response.ok) {
-      throw new ApiError(
+      const error = new ApiError(
         getErrorMessage(payload, `Request failed with status ${response.status}.`),
         response.status,
         payload
       );
+      const retryAfter = response.headers.get("Retry-After");
+      error.retryAfterMs = retryAfter ? Math.max(0, /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now()) : 0;
+      throw error;
     }
     return payload;
   }
@@ -630,6 +660,14 @@
   }
 
   function resetUserData() {
+    feedRequests.forEach(function (controller) { controller.abort(); });
+    feedRequests.clear();
+    creatorRequests.forEach(function (request) { if (request.abortController) request.abortController.abort(); });
+    drainingPlaybackQueues.forEach(function (queue) { queue.destroy(); });
+    drainingPlaybackQueues.clear();
+    if (feedState.queue) feedState.queue.destroy();
+    if (feedPool) { feedPool.destroy(); feedPool = null; }
+    closeClipViewer({ restoreFocus: false });
     if (settingsCleanup) { settingsCleanup(); settingsCleanup = null; }
     closeProfileEditor();
     sessionGeneration += 1;
@@ -652,6 +690,7 @@
       summary: null
     };
     creatorCache = new Map();
+    creatorRequests = new Map();
     feedWatchRecords = new Map();
     failedThumbnailUrls = new Set();
   }
@@ -961,10 +1000,10 @@
     return `<button class="social-action${active ? " is-active" : ""}" type="button" data-like-clip="${escapeHtml(clipId)}" aria-label="${label} clip" aria-pressed="${active}"><span class="feed-action-icon feed-action-icon-heart" aria-hidden="true"></span><span data-like-label>${label}</span></button>`;
   }
 
-  function renderFeedItem(item) {
-    const creator = creatorCache.get(String(item.iosUserId)) || null;
+  function renderFeedItem(item, deferred) {
+    const creator = embeddedCreator(item) || creatorCache.get(String(item.iosUserId)) || null;
     const creatorName = (creator && creator.username) || item.creatorName || "Voxxly creator";
-    const streamUrl = getSafeMediaUrl(item.streamUrl, `/iosclips/${item.id}/stream`);
+    const streamUrl = playbackSource(item);
     const posterUrl = getAbsoluteThumbnailUrl(item.thumbnailUrl);
     const fullEpisodeUrl = getSafeMediaUrl(item.fullEpisodeFilepath);
     const sourceUrl = getSafeMediaUrl(item.sourceUrl);
@@ -985,8 +1024,8 @@
             loop
             tabindex="0"
             role="button"
-            preload="metadata"
-            src="${escapeHtml(streamUrl)}"
+            preload="${deferred ? "none" : "metadata"}"
+            ${deferred ? "" : `src="${escapeHtml(streamUrl)}"`}
             ${posterUrl ? `poster="${escapeHtml(posterUrl)}"` : ""}
             aria-label="Play ${escapeHtml(item.name || "soundbite")}">
           </video>
@@ -1019,14 +1058,20 @@
 
   function renderFeed(options) {
     const renderOptions = options || {};
-    cleanupFeedObservers(Boolean(renderOptions.reportWatch));
+    // Social/metadata publication must not detach or reload the active player.
+    if (usePlaybackWindow && feedPool && document.getElementById("feedList") && feedState.items.length) {
+      if (!feedNavigationLocked) syncFeedWindow(feedState.activeIndex, feedPool.scheduler.direction);
+      updateFeedFooter();
+      return;
+    }
+    cleanupFeedObservers(Boolean(renderOptions.reportWatch), true);
     const hasItems = feedState.items.length > 0;
     const needsInitialLoad = !feedState.started && !feedState.error;
 
     let content = "";
     if (hasItems) {
       feedState.activeIndex = Math.max(0, Math.min(feedState.activeIndex, feedState.items.length - 1));
-      content = `<div id="feedList" class="feed-list${feedState.fetchingFromEnd ? " is-fetching-more" : ""}"><div class="feed-slide" data-feed-slide>${renderFeedItem(feedState.items[feedState.activeIndex])}</div></div>`;
+      content = `<div id="feedList" class="feed-list${feedState.fetchingFromEnd ? " is-fetching-more" : ""}">${usePlaybackWindow ? "" : `<div class="feed-slide" data-feed-slide>${renderFeedItem(feedState.items[feedState.activeIndex])}</div>`}</div>`;
     } else if (feedState.loading || needsInitialLoad) {
       content = `<div class="skeleton skeleton-card" role="status" aria-label="Loading your recommended Soundbites"></div>`;
     } else if (feedState.error) {
@@ -1066,8 +1111,13 @@
         loadMoreFeed();
       });
     }
-    bindFeedItemActions();
-    bindFeedPlayers();
+    if (hasItems && usePlaybackWindow) {
+      const entry = syncFeedWindow(feedState.activeIndex, 1);
+      activateFeedCard(entry.wrapper.querySelector("[data-feed-card]"));
+    } else {
+      bindFeedItemActions();
+      bindFeedPlayers();
+    }
     bindFeedNavigation();
 
     if (!socialState.loaded && !socialState.loading && !socialState.error) {
@@ -1077,6 +1127,50 @@
     if (needsInitialLoad) {
       window.queueMicrotask(loadMoreFeed);
     }
+  }
+
+  function syncFeedWindow(index, direction) {
+    if (!feedPool) {
+      feedPool = new playback.NativePool({
+        source: playbackSource,
+        speculativeNative: feedConfig.speculativeNative === true,
+        telemetry: feedConfig.playbackTelemetry === true,
+        onExpired: function () {
+          if (feedState.queue && getRoute() === routes.feed) loadQueueFeed({ reconnect: true });
+        },
+        create: function (clip) {
+          const slide = document.createElement("div");
+          slide.className = "feed-slide";
+          slide.setAttribute("data-feed-slide", "");
+          slide.innerHTML = renderFeedItem(clip, true);
+          return slide;
+        }
+      });
+    }
+    const previousActive = feedPool.active;
+    const entry = feedPool.reconcile(feedState.items, index, direction);
+    const list = document.getElementById("feedList");
+    const pool = feedPool;
+    const generation = sessionGeneration;
+    pool.scheduler.ordered.forEach(function (item) {
+      if (item.wrapper.parentNode !== list) list.appendChild(item.wrapper);
+      const summary = embeddedCreator(item.clip);
+      if (summary) creatorCache.set(String(summary.id), summary);
+      if (!summary && item.clip.iosUserId) loadCreator(item.clip.iosUserId).then(function (creator) {
+        if (!creator || feedPool !== pool || generation !== sessionGeneration || !pool.scheduler.entries.has(item.key)) return;
+        const name = creator.username || item.clip.creatorName || "Voxxly creator";
+        const link = item.wrapper.querySelector(".feed-overlay-creator");
+        const avatar = item.wrapper.querySelector(".feed-avatar-link");
+        link.textContent = "@" + name;
+        link.setAttribute("aria-label", `View @${name} profile`);
+        avatar.setAttribute("aria-label", `View @${name} profile`);
+        avatar.innerHTML = avatarMarkup(creator, name, "feed-creator-avatar");
+      });
+    });
+    bindFeedItemActions();
+    bindFeedPlayers(null, false);
+    if (previousActive && !feedPool.active && entry) activateFeedCard(entry.wrapper.querySelector("[data-feed-card]"));
+    return entry;
   }
 
   function bindFeedItemActions() {
@@ -1209,7 +1303,12 @@
         if (!Array.isArray(results[0]) || !Array.isArray(results[1])) {
           throw new ApiError("Your social collections returned an unexpected response.", 500, results);
         }
-        await Promise.all(Array.from(new Set(results[0].concat(results[1]).map(function (clip) {
+        results[0].concat(results[1]).forEach(function (clip) {
+          const creator = clip && embeddedCreator(clip);
+          if (creator) creatorCache.set(String(creator.id), creator);
+        });
+        // Feed social IDs do not need every saved creator's profile first.
+        if (getRoute() === routes.saved) await Promise.all(Array.from(new Set(results[0].concat(results[1]).map(function (clip) {
           return clip && clip.iosUserId;
         }).filter(Boolean))).map(loadCreator));
         if (!isCurrentRequest()) {
@@ -1364,23 +1463,29 @@
     if (creatorCache.has(cacheKey)) {
       return creatorCache.get(cacheKey);
     }
-
-    try {
+    const requests = creatorRequests;
+    if (requests.has(cacheKey)) return requests.get(cacheKey);
+    const controller = new AbortController();
+    const pending = (async function () { try {
       const path = fillPathTemplate(profileConfig.userPathTemplate || "/ios/users/{userId}", { userId: userId });
-      const creator = await requestJson(path);
+      const creator = await requestJson(path, { signal: controller.signal });
       if (isCurrentRequest()) {
         cache.set(cacheKey, creator || null);
       }
       return creator;
     } catch (error) {
-      if (isCurrentRequest()) {
+      if (isCurrentRequest() && !controller.signal.aborted) {
         cache.set(cacheKey, null);
       }
       return null;
-    }
+    } finally { if (requests.get(cacheKey) === pending) requests.delete(cacheKey); } })();
+    requests.set(cacheKey, pending);
+    pending.abortController = controller;
+    return pending;
   }
 
   async function loadMoreFeed(options) {
+    if (usePlaybackWindow && feedConfig.queueV2 === true && window.VoxxlyPlaybackQueue && !feedState.sharedClipId) return loadQueueFeed(options);
     const loadOptions = options || {};
     const restartFromEnd = Boolean(loadOptions.restartFromEnd);
     const fromEnd = Boolean(loadOptions.fromEnd || restartFromEnd);
@@ -1391,6 +1496,8 @@
     const state = feedState;
     const generation = sessionGeneration;
     const userId = currentUser.id;
+    const controller = new AbortController();
+    feedRequests.add(controller);
     const hadItems = state.items.length > 0;
     const lastClip = fromEnd && hadItems
       ? state.items[state.activeIndex] || state.items[state.items.length - 1]
@@ -1398,7 +1505,7 @@
     let advancedToNewItem = -1;
     let advanceVelocity = state.pendingAdvanceVelocity;
     const isCurrentRequest = function () {
-      return feedState === state && sessionGeneration === generation && currentUser && String(currentUser.id) === String(userId);
+      return !controller.signal.aborted && feedState === state && sessionGeneration === generation && currentUser && String(currentUser.id) === String(userId);
     };
     if (restartFromEnd) {
       state.sessionId = randomId("soundbites");
@@ -1437,7 +1544,7 @@
       if (state.sharedClipId && !state.sharedClipLoaded) {
         state.sharedClipLoaded = true;
         try {
-          const sharedClip = await requestJson(`/iosclips/${encodeURIComponent(state.sharedClipId)}`);
+          const sharedClip = await requestJson(`/iosclips/${encodeURIComponent(state.sharedClipId)}`, { signal: controller.signal });
           if (!isCurrentRequest()) {
             return;
           }
@@ -1456,8 +1563,9 @@
 
       let payload;
       try {
-        payload = await requestJson(url.toString());
+        payload = await requestJson(url.toString(), { signal: controller.signal });
       } catch (recommendationError) {
+        if (controller.signal.aborted) throw recommendationError;
         if (state.fallbackAttempted) {
           throw recommendationError;
         }
@@ -1470,7 +1578,7 @@
         if (restartFromEnd) {
           fallbackUrl.searchParams.set(feedConfig.restartQueryParam || "restart", "true");
         }
-        payload = await requestJson(fallbackUrl.toString());
+        payload = await requestJson(fallbackUrl.toString(), { signal: controller.signal });
         state.usingFallback = true;
       }
 
@@ -1492,15 +1600,22 @@
         return true;
       });
 
-      await Promise.all(Array.from(new Set(newItems.map(function (item) { return item.iosUserId; }).filter(Boolean))).map(loadCreator));
+      // Publish immediately. Only the bounded nearby window enriches missing creators.
+      newItems.forEach(function (item) {
+        const creator = embeddedCreator(item);
+        if (creator) creatorCache.set(String(creator.id), creator);
+      });
       if (!isCurrentRequest()) {
         return;
       }
       let firstNewIndex = state.items.length;
       if (restartFromEnd && lastClip) {
-        state.items = [lastClip].concat(newItems);
-        state.activeIndex = 0;
-        firstNewIndex = 1;
+        // Preserve the two previous clips across an exhausted-batch rebuild.
+        // Repeated cycle IDs share a retained player; the scheduler deduplicates DOM IDs.
+        const history = state.items.slice(Math.max(0, state.activeIndex - 2), state.activeIndex);
+        state.items = history.concat(lastClip, newItems);
+        state.activeIndex = history.length;
+        firstNewIndex = history.length + 1;
       } else {
         state.items = state.items.concat(newItems);
       }
@@ -1520,6 +1635,7 @@
         state.error = error.message || "Unable to load recommendations right now.";
       }
     } finally {
+      feedRequests.delete(controller);
       state.loading = false;
       if (!isCurrentRequest()) {
         return;
@@ -1539,6 +1655,81 @@
         }
       } else {
         renderFeed();
+      }
+    }
+  }
+
+  async function settleQueueClip(clip) {
+    if (!feedState.queue || !clip || !clip._displayed || clip._settled) return;
+    stopWatching(clip.id, false);
+    if (clip._watchFinal == null) clip._watchFinal = Math.max(0, getWatchRecord(clip.id).watchedSec - (clip._watchStart || 0));
+    try { await feedState.queue.ack(clip, clip._watchFinal, true); }
+    catch (error) {
+      if ([403, 404, 409].includes(error.status)) clip._reservationInvalid = true;
+      throw error;
+    }
+    clip._settled = true;
+  }
+
+  async function loadQueueFeed(options) {
+    const settings = options || {};
+    const state = feedState;
+    if (!currentUser || state.loading || document.hidden || getRoute() !== routes.feed) return;
+    if (feedNavigationLocked && !state.fetchingFromEnd) { state.queueRefillRequested = true; return; }
+    const generation = sessionGeneration;
+    const valid = function () { return feedState === state && state.queue === queue && generation === sessionGeneration && currentUser && getRoute() === routes.feed; };
+    if (!state.queue) state.queue = new window.VoxxlyPlaybackQueue.Queue(requestJson, state.sessionId, function () { return crypto.randomUUID(); });
+    const queue = state.queue;
+    state.loading = true;
+    state.started = true;
+    state.error = "";
+    state.queueRefillRequested = false;
+    if (!state.items.length) renderFeed();
+    try {
+      // Retry only actual displayed watches, with each original eventId/payload.
+      for (const item of state.items) if (item._watchFinal != null && !item._settled && !item._reservationInvalid && item._reservation.expiresAt > Date.now()) await settleQueueClip(item);
+      const reserved = normalizeClipList(await queue.reserve());
+      if (feedAnimationPromise) await feedAnimationPromise;
+      if (!valid() || state.queue !== queue) return;
+      const oldCurrent = state.items[state.activeIndex];
+      const oldByReservation = new Map(state.items.filter(function (item) { return item._reservation; }).map(function (item) { return [item._reservation.id, item]; }));
+      const upcoming = reserved.map(function (item) {
+        const previous = oldByReservation.get(item._reservation.id);
+        // Keep watch bookkeeping but accept revalidated metadata/revisions.
+        return previous ? Object.assign(previous, item) : item;
+      });
+      const oldReservation = oldCurrent && oldCurrent._reservation && oldCurrent._reservation.id;
+      const isOldCurrentReserved = upcoming.some(function (item) { return item._reservation.id === oldReservation; });
+      const retainCurrent = oldCurrent && !oldCurrent._reservationInvalid && !settings.reconnect && (oldCurrent._settled || isOldCurrentReserved);
+      const history = state.items.slice(Math.max(0, state.activeIndex - 2), state.activeIndex).filter(function (item) {
+        return item._settled && !item._reservationInvalid && item._reservation.expiresAt > Date.now();
+      });
+      if (retainCurrent) {
+        state.items = history.concat(oldCurrent, upcoming.filter(function (item) { return item._reservation.id !== oldReservation; }));
+        state.activeIndex = history.length;
+      } else {
+        // Missing/expired/removed current reservations cannot keep playing cached bytes.
+        if (feedPool) { feedPool.destroy(); feedPool = null; }
+        state.items = upcoming;
+        state.activeIndex = 0;
+      }
+      state.hasMore = true;
+      if (state.pendingAdvance && retainCurrent && state.items[state.activeIndex + 1]) {
+        state.pendingAdvance = false;
+        setFeedEndLoading(false);
+        transitionFeedToIndex(state.activeIndex + 1, 1, state.pendingAdvanceVelocity);
+      } else if (feedPool) {
+        if (!feedNavigationLocked) syncFeedWindow(state.activeIndex, 1);
+      } else renderFeed();
+    } catch (error) {
+      if (valid()) state.error = error.message || "Unable to refill the playback queue. Swipe again to retry.";
+    } finally {
+      if (state.queue !== queue) return;
+      state.loading = false;
+      if (valid()) {
+        if (state.fetchingFromEnd) { setFeedEndLoading(false); feedNavigationLocked = false; }
+        if (!feedPool) renderFeed();
+        else updateFeedFooter();
       }
     }
   }
@@ -1577,6 +1768,11 @@
     }
 
     const extraFlags = flags || {};
+    if (feedState.queue) {
+      if (!Object.values(extraFlags).some(Boolean)) return Promise.resolve(null);
+      // Social events keep their existing endpoint, but v2 owns all watch seconds.
+      watchSec = 0;
+    }
     return requestJson(feedConfig.interactionPath || "/iosclips/interactions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1621,7 +1817,22 @@
     const state = feedState;
     const generation = sessionGeneration;
     const userId = currentUser && currentUser.id;
-    await finalizeFeedClipBeforeRefresh(clipId);
+    if (state.queue) {
+      try { await settleQueueClip(state.items[state.activeIndex]); }
+      catch (error) {
+        if (feedState === state && getRoute() === routes.feed) {
+          state.error = "Couldn’t confirm your last watch. Swipe again to retry.";
+          setFeedEndLoading(false);
+          feedNavigationLocked = false;
+          updateFeedFooter();
+          if ([403, 404, 409].includes(error.status)) {
+            state.pendingAdvance = false;
+            loadQueueFeed({ reconnect: true });
+          }
+        }
+        return;
+      }
+    } else await finalizeFeedClipBeforeRefresh(clipId);
     if (feedState !== state || sessionGeneration !== generation || !currentUser || String(currentUser.id) !== String(userId) || getRoute() !== routes.feed) {
       return;
     }
@@ -1631,7 +1842,7 @@
   function enableFeedAudio() {
     // Retry playback after a gesture while preserving the user's audio preference.
     applyFeedAudioState();
-    const video = app.querySelector("[data-feed-video]");
+    const video = app.querySelector("[data-feed-card].is-active [data-feed-video]");
     if (!video) {
       return;
     }
@@ -1689,7 +1900,7 @@
         return;
       }
       video.volume = feedVolume;
-      video.muted = !feedAudioEnabled;
+      video.muted = !feedAudioEnabled || !card.classList.contains("is-active");
       updateFeedVolumeControl(card, video);
     });
     if (clipViewerState) {
@@ -1714,7 +1925,8 @@
     control.dataset.volumeBound = "true";
     button.addEventListener("click", function (event) {
       event.stopPropagation();
-      feedAudioEnabled = video.muted || video.volume === 0;
+      const activeVideo = card.querySelector("[data-clip-viewer-video]") || video;
+      feedAudioEnabled = activeVideo.muted || activeVideo.volume === 0;
       applyFeedAudioState();
     });
     slider.addEventListener("input", function (event) {
@@ -1736,24 +1948,70 @@
 
   function transitionFeedToIndex(nextIndex, direction, velocity) {
     const feedList = document.getElementById("feedList");
-    const currentSlide = feedList && feedList.querySelector("[data-feed-slide]");
+    const currentSlide = feedList && (feedPool && feedPool.active ? feedPool.active.wrapper : feedList.querySelector("[data-feed-slide]"));
     const nextItem = feedState.items[nextIndex];
-    if (!feedList || !currentSlide || !nextItem || typeof currentSlide.animate !== "function") {
+    if (nextItem && nextItem._reservation && nextItem._reservation.expiresAt <= Date.now()) {
+      feedState.error = "This playback reservation expired. Reconnecting…";
+      // Reconnect revalidates metadata; don't reuse expired media while it is pending.
+      if (feedPool) { feedPool.destroy(); feedPool = null; }
+      loadQueueFeed({ reconnect: true });
+      return;
+    }
+    if (nextItem && nextItem._reservationInvalid) {
+      loadQueueFeed({ reconnect: true });
+      return;
+    }
+    if (!feedList || !currentSlide || !nextItem) {
       feedState.activeIndex = nextIndex;
       renderFeed({ reportWatch: true });
       return;
     }
+    if (typeof currentSlide.animate !== "function" && !usePlaybackWindow) {
+      feedState.activeIndex = nextIndex;
+      renderFeed({ reportWatch: true });
+      return;
+    }
+    if (typeof currentSlide.animate !== "function" && usePlaybackWindow) {
+      const entry = syncFeedWindow(nextIndex, direction);
+      activateFeedCard(entry.wrapper.querySelector("[data-feed-card]"));
+      feedPool.scheduler.ordered.forEach(function (item) { if (item !== entry) feedPool.hide(item); });
+      feedState.activeIndex = nextIndex;
+      return;
+    }
 
     feedNavigationLocked = true;
+    const outgoingClip = feedState.items[feedState.activeIndex];
+    if (feedState.queue && outgoingClip !== nextItem) {
+      const state = feedState;
+      settleQueueClip(outgoingClip).then(function () {
+        if (feedState === state && getRoute() === routes.feed) loadQueueFeed();
+      }).catch(function () {
+        if (feedState === state) state.error = "Watch sync paused. It will retry at the end of the queue.";
+      });
+    }
     const transitionGeneration = ++feedTransitionGeneration;
-    const incomingSlide = document.createElement("div");
-    incomingSlide.className = "feed-slide";
-    incomingSlide.setAttribute("data-feed-slide", "");
-    incomingSlide.innerHTML = renderFeedItem(nextItem);
+    const navigationAt = performance.now();
+    const incomingEntry = usePlaybackWindow ? syncFeedWindow(nextIndex, direction) : null;
+    const incomingSlide = incomingEntry ? incomingEntry.wrapper : document.createElement("div");
+    if (incomingEntry) {
+      feedPool.show(incomingEntry, false);
+      incomingEntry.navigationAt = navigationAt;
+    } else {
+      incomingSlide.className = "feed-slide";
+      incomingSlide.setAttribute("data-feed-slide", "");
+      incomingSlide.innerHTML = renderFeedItem(nextItem);
+    }
+    if (incomingSlide === currentSlide) {
+      feedState.activeIndex = nextIndex;
+      incomingEntry.video.currentTime = 0;
+      activateFeedCard(incomingSlide.querySelector("[data-feed-card]"));
+      feedNavigationLocked = false;
+      return;
+    }
     const incomingStart = direction > 0 ? 100 : -100;
     const outgoingEnd = direction > 0 ? -100 : 100;
     incomingSlide.style.transform = `translate3d(0, ${incomingStart}%, 0)`;
-    feedList.appendChild(incomingSlide);
+    if (incomingSlide.parentNode !== feedList) feedList.appendChild(incomingSlide);
 
     bindFeedItemActions();
     const incomingCard = incomingSlide.querySelector("[data-feed-card]");
@@ -1779,8 +2037,13 @@
       { transform: `translate3d(0, ${incomingStart}%, 0)` },
       { transform: "translate3d(0, 0, 0)" }
     ], timing);
+    feedTransitionCleanup = function () {
+      window.clearTimeout(activateIncomingTimer);
+      outgoingAnimation.cancel();
+      incomingAnimation.cancel();
+    };
 
-    Promise.all([
+    feedAnimationPromise = Promise.all([
       outgoingAnimation.finished.catch(function () {}),
       incomingAnimation.finished.catch(function () {})
     ]).then(function () {
@@ -1791,10 +2054,17 @@
       window.clearTimeout(activateIncomingTimer);
       activateFeedCard(incomingCard);
       feedState.activeIndex = nextIndex;
-      currentSlide.remove();
+      if (feedPool) {
+        feedPool.scheduler.ordered.forEach(function (entry) {
+          if (entry !== incomingEntry) feedPool.hide(entry);
+        });
+      } else currentSlide.remove();
       incomingSlide.style.transform = "translate3d(0, 0, 0)";
       incomingAnimation.cancel();
+      outgoingAnimation.cancel();
+      feedTransitionCleanup = null;
       feedNavigationLocked = false;
+      if (feedState.queueRefillRequested) loadQueueFeed();
 
     });
   }
@@ -1920,7 +2190,7 @@
         return;
       }
       const target = event.target;
-      if (target && target.closest && target.closest("input, textarea, select, button, a, video")) {
+      if (target && target.closest && target.closest("input, textarea, select, button, a")) {
         return;
       }
       if (event.key === "ArrowDown" || event.key === "PageDown") {
@@ -1950,6 +2220,13 @@
   }
 
   function activateFeedCard(card) {
+    if (feedPool) {
+      const entry = feedPool.scheduler.ordered.find(function (item) { return item.wrapper.contains(card); });
+      if (!entry) return;
+      if (entry.clip._watchStart == null) entry.clip._watchStart = getWatchRecord(entry.clip.id).watchedSec;
+      entry.clip._displayed = true;
+      feedPool.activate(entry, entry.navigationAt);
+    }
     app.querySelectorAll("[data-feed-card]").forEach(function (candidate) {
       const video = candidate.querySelector("[data-feed-video]");
       const isActive = candidate === card;
@@ -1958,18 +2235,21 @@
         return;
       }
       if (isActive) {
+        if (document.hidden) return;
         video.volume = feedVolume;
         video.muted = !feedAudioEnabled;
         updateFeedVolumeControl(candidate, video);
         video.play().catch(function () {
+          if (!candidate.isConnected || !candidate.classList.contains("is-active") || document.hidden) return;
           if (!video.muted) {
             video.muted = true;
             updateFeedVolumeControl(candidate, video);
             video.play().catch(function () {});
           }
         });
-      } else if (!video.paused) {
-        video.pause();
+      } else {
+        video.muted = true;
+        if (!video.paused) video.pause();
       }
     });
   }
@@ -2011,14 +2291,18 @@
         }
       });
       video.addEventListener("play", function () {
+        if (!card.classList.contains("is-active") || document.hidden) { video.pause(); return; }
         app.querySelectorAll("[data-feed-video]").forEach(function (otherVideo) {
           if (otherVideo !== video && !otherVideo.paused) {
             otherVideo.pause();
           }
         });
-        startWatching(clipId);
         updatePlaybackLabel();
       });
+      video.addEventListener("playing", function () {
+        if (card.classList.contains("is-active") && !document.hidden) startWatching(clipId);
+      });
+      video.addEventListener("waiting", function () { stopWatching(clipId, false); });
       video.addEventListener("pause", function () {
         stopWatching(clipId, true);
         updatePlaybackLabel();
@@ -2028,7 +2312,7 @@
         updatePlaybackLabel();
       });
       video.addEventListener("timeupdate", function () {
-        if (previousPlaybackTime > 1 && video.currentTime + 0.5 < previousPlaybackTime) {
+        if (card.classList.contains("is-active") && !video.paused && previousPlaybackTime > 1 && video.currentTime + 0.5 < previousPlaybackTime) {
           stopWatching(clipId, false);
           const record = getWatchRecord(clipId);
           reportInteraction(clipId, record.watchedSec, { didVideoRepeat: true });
@@ -2042,8 +2326,11 @@
     }
   }
 
-  function cleanupFeedObservers(reportWatch) {
+  function cleanupFeedObservers(reportWatch, preserveQueue) {
+    const departingClip = feedPool && feedPool.active ? feedPool.active.clip : feedState.items[feedState.activeIndex];
     feedTransitionGeneration += 1;
+    if (feedTransitionCleanup) { feedTransitionCleanup(); feedTransitionCleanup = null; }
+    feedAnimationPromise = null;
     if (feedNavigationCleanup) {
       feedNavigationCleanup();
     }
@@ -2059,6 +2346,33 @@
         stopWatching(clipId, true);
       }
     });
+    if (feedPool) { feedPool.destroy(); feedPool = null; }
+    if (!preserveQueue) {
+      feedRequests.forEach(function (controller) { controller.abort(); });
+      feedRequests.clear();
+      creatorRequests.forEach(function (request) { if (request.abortController) request.abortController.abort(); });
+      creatorRequests.clear();
+      feedState.loading = false;
+      feedState.started = feedState.items.length > 0;
+    }
+    if (!preserveQueue && feedState.queue) {
+      const queue = feedState.queue;
+      // Finalize only the actually displayed clip. A short bounded drain allows
+      // real watch reporting on route exit; all preparation is already disposed.
+      const pending = settleQueueClip(departingClip);
+      drainingPlaybackQueues.add(queue);
+      const timeout = window.setTimeout(function () { queue.destroy(); }, 5000);
+      pending.catch(function () {}).finally(function () {
+        window.clearTimeout(timeout);
+        queue.destroy();
+        drainingPlaybackQueues.delete(queue);
+      });
+      feedState.queue = null;
+      // A fresh visit reconnects and revalidates access rather than replaying stale reservations.
+      feedState.items = [];
+      feedState.started = false;
+      feedState.loading = false;
+    }
   }
 
   function getDefaultClipName(file) {
@@ -2642,7 +2956,8 @@
     clipViewerState = null;
     document.removeEventListener("keydown", handleClipViewerKeydown);
     const video = state.overlay.querySelector("[data-clip-viewer-video]");
-    if (video) {
+    if (state.pool) state.pool.destroy();
+    else if (video) {
       video.pause();
       video.removeAttribute("src");
       video.load();
@@ -2666,19 +2981,35 @@
       return;
     }
 
-    const video = state.overlay.querySelector("[data-clip-viewer-video]");
+    let video = state.overlay.querySelector("[data-clip-viewer-video]");
+    if (state.pool) {
+      const direction = state.index < (state.previousIndex || 0) ? -1 : 1;
+      const entry = state.pool.reconcile(state.clips, state.index, direction);
+      const dialog = state.overlay.querySelector(".clip-viewer-dialog");
+      state.pool.scheduler.ordered.forEach(function (item) {
+        if (item.video.parentNode !== dialog) dialog.prepend(item.video);
+        item.video.removeAttribute("data-clip-viewer-video");
+        if (item !== entry) state.pool.hide(item);
+      });
+      video = entry.video;
+      video.setAttribute("data-clip-viewer-video", "");
+      state.pool.activate(entry);
+      state.previousIndex = state.index;
+    }
     const title = state.overlay.querySelector("[data-clip-viewer-title]");
     const creatorLink = state.overlay.querySelector("[data-clip-viewer-creator]");
     const previousButton = state.overlay.querySelector("[data-clip-viewer-previous]");
     const nextButton = state.overlay.querySelector("[data-clip-viewer-next]");
-    const creator = creatorCache.get(String(clip.iosUserId)) || (profileState.user && String(profileState.user.id) === String(clip.iosUserId) ? profileState.user : null);
+    const creator = embeddedCreator(clip) || creatorCache.get(String(clip.iosUserId)) || (profileState.user && String(profileState.user.id) === String(clip.iosUserId) ? profileState.user : null);
     const creatorName = (creator && creator.username) || clip.creatorName || "Voxxly creator";
     const clipName = clip.name || "Untitled soundbite";
-    const streamUrl = getSafeMediaUrl(clip.streamUrl, `/iosclips/${clip.id}/stream`);
+    const streamUrl = playbackSource(clip);
     const posterUrl = getAbsoluteThumbnailUrl(clip.thumbnailUrl);
 
-    video.pause();
-    video.src = streamUrl;
+    if (!state.pool) {
+      video.pause();
+      video.src = streamUrl;
+    }
     if (posterUrl) {
       video.poster = posterUrl;
     } else {
@@ -2695,8 +3026,10 @@
     previousButton.disabled = state.index === 0;
     nextButton.hidden = state.index === state.clips.length - 1;
     nextButton.disabled = state.index === state.clips.length - 1;
-    video.load();
+    if (!state.pool) video.load();
     video.play().catch(function () {
+      if (clipViewerState !== state || !video.hasAttribute("data-clip-viewer-video") || document.hidden) return;
+      if (!video.muted) { video.muted = true; video.play().catch(function () {}); }
       updateClipViewerPlaybackState();
     });
   }
@@ -2828,6 +3161,25 @@
       overlay: overlay,
       previousFocus: trigger || document.activeElement
     };
+    if (usePlaybackWindow) {
+      clipViewerState.pool = new playback.NativePool({
+        source: playbackSource,
+        speculativeNative: feedConfig.speculativeNative === true,
+        telemetry: feedConfig.playbackTelemetry === true,
+        create: function (clip) {
+          const video = document.createElement("video");
+          video.className = "clip-viewer-video";
+          video.playsInline = true;
+          video.loop = true;
+          video.setAttribute("role", "button");
+          video.setAttribute("data-clip-title", clip.name || "soundbite");
+          const poster = getAbsoluteThumbnailUrl(clip.thumbnailUrl);
+          if (poster) video.poster = poster;
+          bindViewerVideo(video, overlay);
+          return video;
+        }
+      });
+    }
     document.documentElement.classList.add("clip-viewer-open");
     setClipViewerPageInert(true);
 
@@ -2841,8 +3193,16 @@
     overlay.querySelector("[data-clip-viewer-next]").addEventListener("click", function () { moveClipViewer(1); });
     const viewerVideo = overlay.querySelector("[data-clip-viewer-video]");
     bindFeedVolumeControl(overlay, viewerVideo);
+    if (clipViewerState.pool) viewerVideo.remove();
+    else bindViewerVideo(viewerVideo, overlay);
+    document.addEventListener("keydown", handleClipViewerKeydown);
+    updateClipViewer();
+    overlay.querySelector("[data-clip-viewer-close]").focus({ preventScroll: true });
+  }
+
+  function bindViewerVideo(viewerVideo, overlay) {
     viewerVideo.addEventListener("volumechange", function () {
-      updateFeedVolumeControl(overlay, viewerVideo);
+      if (viewerVideo.hasAttribute("data-clip-viewer-video")) updateFeedVolumeControl(overlay, viewerVideo);
     });
     viewerVideo.addEventListener("click", toggleClipViewerPlayback);
     viewerVideo.addEventListener("play", updateClipViewerPlaybackState);
@@ -2853,9 +3213,6 @@
         toggleClipViewerPlayback();
       }
     });
-    document.addEventListener("keydown", handleClipViewerKeydown);
-    updateClipViewer();
-    overlay.querySelector("[data-clip-viewer-close]").focus({ preventScroll: true });
   }
 
   function bindClipViewerLinks(clips) {
@@ -2876,7 +3233,7 @@
   }
 
   function renderSavedClip(clip) {
-    const creator = creatorCache.get(String(clip.iosUserId)) || null;
+    const creator = embeddedCreator(clip) || creatorCache.get(String(clip.iosUserId)) || null;
     const creatorName = (creator && creator.username) || clip.creatorName || "Voxxly creator";
     return `
       <article class="profile-clip saved-clip">
@@ -3876,6 +4233,10 @@
   }
 
   async function handleLogout() {
+    if (feedState.queue) {
+      try { await Promise.race([settleQueueClip(feedState.items[feedState.activeIndex]), new Promise(function (resolve) { window.setTimeout(resolve, 2000); })]); }
+      catch (_) { /* Signing out must not depend on analytics availability. */ }
+    }
     const refreshToken = getRefreshToken();
     logoutButton.disabled = true;
     if (refreshToken) {
@@ -3919,6 +4280,9 @@
   logoutButton.addEventListener("click", handleLogout);
   window.addEventListener("hashchange", render);
   document.addEventListener("visibilitychange", function () {
+    if (feedPool) feedPool.suspend(document.hidden);
+    if (clipViewerState && clipViewerState.pool) clipViewerState.pool.suspend(document.hidden);
+    if (clipViewerState && document.hidden) clipViewerState.overlay.querySelector("[data-clip-viewer-video]").pause();
     if (document.hidden && getRoute() === routes.feed) {
       app.querySelectorAll("[data-feed-video]").forEach(function (video) {
         if (!video.paused) {

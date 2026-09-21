@@ -1,0 +1,24 @@
+{
+  "id": 123,
+  "iosUserId": 45,
+  "name": "Example clip",
+  "streamUrl": "/iosclips/123/stream",
+  "thumbnailUrl": "https://images.rhapsidious.com/clip-thumbnails/123-v1-example.jpg",
+  "fullEpisodeName": "Example episode",
+  "fullEpisodeFilepath": "https://example.com/episode",
+  "repostedByCount": 0,
+  "repostedByUsernames": [],
+  "sensitiveReason": null,
+  "minimumAge": null,
+  "moderationStatus": "APPROVED",
+  "creatorName": "Rights-holder name",
+  "sourcePlatform": "Example platform",
+  "sourceUrl": "https://example.com/source",
+  "mature": false,
+  "playback": null,
+  "creator": {
+    "id": 45,
+    "username": "example",
+    "profilePhotoUrl": "https://images.rhapsidious.com/example.jpg"
+  }
+}

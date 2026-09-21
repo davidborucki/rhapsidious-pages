@@ -34,6 +34,13 @@ window.APP_CONFIG = {
     maxPollAttempts: 80
   },
   feed: {
+    // Roll back native player retention independently of the backend contract.
+    playbackWindow: true,
+    // Opt in only after platform/transfer qualification; preload is not a byte cap.
+    speculativeNative: false,
+    playbackTelemetry: false,
+    // Queue v2 requires the backend schema/flag rollout; never probe legacy feed early.
+    queueV2: false,
     path: "/iosclips/feed",
     interactionPath: "/iosclips/interactions",
     batchSize: 10,

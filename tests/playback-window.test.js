@@ -186,3 +186,15 @@ test("static container packaging includes every application script", () => {
   const docker = fs.readFileSync(path.join(__dirname, "../Dockerfile"), "utf8");
   for (const match of html.matchAll(/<script src="\.\/([^?\"]+)/g)) assert.ok(docker.includes(match[1]), `${match[1]} must be copied to the static image`);
 });
+
+test("feed transition starts playback synchronously, without a delayed or duplicate activation", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const source = fs.readFileSync(path.join(__dirname, "../app.js"), "utf8");
+  const transition = source.slice(source.indexOf("function transitionFeedToIndex("), source.indexOf("function navigateFeedBy("));
+  assert.doesNotMatch(transition, /activateIncomingTimer|setTimeout/);
+  assert.equal((transition.match(/activateFeedCard\(incomingCard\)/g) || []).length, 1);
+  assert.ok(transition.indexOf("activateFeedCard(incomingCard)") < transition.indexOf("feedAnimationPromise = Promise.all"));
+  const activation = source.slice(source.indexOf("function activateFeedCard("), source.indexOf("function bindFeedPlayers("));
+  assert.match(activation, /error\.name !== "NotAllowedError"/);
+});

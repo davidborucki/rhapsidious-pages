@@ -107,15 +107,26 @@ const { execFileSync } = require("node:child_process");
     assert.equal(feeds, 1, "legacy feed never fetched early");
     assert.equal(interactions.length, 0, "speculation emits no watches");
     await page.evaluate(() => { window.firstVideo = document.querySelector(".soundbite-card.is-active video"); window.firstSource = firstVideo.src; });
-    async function step(direction, id) {
+    async function step(direction, id, verifyImmediate = false) {
+      if (verifyImmediate) await page.evaluate(() => {
+        window.addEventListener("keydown", () => {
+          const card = document.querySelector(".soundbite-card.is-active");
+          window.synchronousActivation = { id: card?.dataset.clipId, source: card?.querySelector("video").getAttribute("src") };
+        }, { once: true });
+      });
       await page.keyboard.press(direction > 0 ? "ArrowDown" : "ArrowUp");
+      if (verifyImmediate) {
+        const activation = await page.evaluate(() => window.synchronousActivation);
+        assert.equal(activation.id, String(id), "incoming clip activates within the navigation event, with no animation timer");
+        assert.ok(activation.source, "cold loading may begin immediately too");
+      }
       await page.waitForFunction(id => document.querySelector(".soundbite-card.is-active")?.dataset.clipId === String(id), id);
       await page.waitForTimeout(650);
       assert.ok(await page.locator("[data-feed-video]").count() <= 5);
       assert.equal(await page.evaluate(() => [...document.querySelectorAll("video")].filter(video => !video.paused && !video.muted).length <= 1), true);
       assert.equal(await page.evaluate(() => [...document.querySelectorAll("[data-feed-slide][hidden]")].every(slide => slide.inert && slide.querySelector("video").tabIndex === -1)), true);
     }
-    await step(1, 2);
+    await step(1, 2, true);
     await step(1, 3);
     const beforeBackTransfers = transfers.filter(item => item.path === "/media/1.mp4").length;
     await step(-1, 2);
@@ -291,7 +302,9 @@ const { execFileSync } = require("node:child_process");
     assert.equal(await rollback.locator("video").count(), 1);
     await rollback.keyboard.press("ArrowDown");
     await rollback.waitForFunction(() => document.querySelector(".soundbite-card.is-active")?.dataset.clipId === "2");
+    await rollback.locator(active).evaluate(video => video.pause());
     await rollback.waitForTimeout(600);
+    assert.equal(await rollback.locator(active).evaluate(video => video.paused), true, "animation completion must not override a user pause");
     assert.equal(await rollback.locator("video").count(), 1);
     await rollback.close();
     assert.deepEqual(failures, []);

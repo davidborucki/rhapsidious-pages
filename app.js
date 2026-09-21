@@ -2024,11 +2024,6 @@
       fill: "forwards"
     };
     bindFeedPlayers(null, false);
-    const activateIncomingTimer = window.setTimeout(function () {
-      if (transitionGeneration === feedTransitionGeneration && getRoute() === routes.feed) {
-        activateFeedCard(incomingCard);
-      }
-    }, Math.min(150, duration * 0.35));
     const outgoingAnimation = currentSlide.animate([
       { transform: "translate3d(0, 0, 0)" },
       { transform: `translate3d(0, ${outgoingEnd}%, 0)` }
@@ -2038,10 +2033,13 @@
       { transform: "translate3d(0, 0, 0)" }
     ], timing);
     feedTransitionCleanup = function () {
-      window.clearTimeout(activateIncomingTimer);
       outgoingAnimation.cancel();
       incomingAnimation.cancel();
     };
+    // Start the selected clip in this navigation gesture, not after an animation
+    // timer. This also starts a cold source request immediately and keeps play()
+    // inside the user gesture when the browser requires one for audible playback.
+    activateFeedCard(incomingCard);
 
     feedAnimationPromise = Promise.all([
       outgoingAnimation.finished.catch(function () {}),
@@ -2051,8 +2049,6 @@
         return;
       }
 
-      window.clearTimeout(activateIncomingTimer);
-      activateFeedCard(incomingCard);
       feedState.activeIndex = nextIndex;
       if (feedPool) {
         feedPool.scheduler.ordered.forEach(function (entry) {
@@ -2239,7 +2235,10 @@
         video.volume = feedVolume;
         video.muted = !feedAudioEnabled;
         updateFeedVolumeControl(candidate, video);
-        video.play().catch(function () {
+        video.play().catch(function (error) {
+          // An intentional pause aborts a pending play(). It is not an autoplay
+          // denial and must never restart the video through the muted retry.
+          if (!error || error.name !== "NotAllowedError") return;
           if (!candidate.isConnected || !candidate.classList.contains("is-active") || document.hidden) return;
           if (!video.muted) {
             video.muted = true;

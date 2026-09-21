@@ -50,7 +50,7 @@ The final acknowledgment must succeed before refilling an exhausted cycle. Loadi
 
 ## Diagnostics and verification
 
-With telemetry enabled, run `window.voxxlyPlaybackDiagnostics()` in developer tools. It reports clip ID/revision (not tokens or signed URLs), first-frame method, warm/cold status, activation-to-first-frame and navigation-to-first-frame, buffer seconds, startup waiting separately from rebuffering, eviction/unused-entry state, resource count, and JS heap size where exposed. Navigation timing includes the existing animation lead-in; activation timing excludes it. `requestVideoFrameCallback` measures a rendered frame. The documented fallback is `playing` plus an animation frame, explicitly labeled a readiness proxy.
+With telemetry enabled, run `window.voxxlyPlaybackDiagnostics()` in developer tools. It reports clip ID/revision (not tokens or signed URLs), first-frame method, warm/cold status, activation-to-first-frame and navigation-to-first-frame, buffer seconds, startup waiting separately from rebuffering, eviction/unused-entry state, resource count, and JS heap size where exposed. Navigation timing includes synchronous slide preparation; activation timing excludes it. Playback now starts in the navigation gesture alongside the animation, without the former delay of up to 150 ms. Animation completion no longer calls play a second time, so it cannot override a pause made during the transition. `requestVideoFrameCallback` measures a rendered frame. The documented fallback is `playing` plus an animation frame, explicitly labeled a readiness proxy.
 
 PerformanceResourceTiming records are matched to actual native `video` requests, never an unrelated fetch. Where timing is exposed they include transfer/encoded bytes, first-byte/redirect timing, duration and negotiated protocol. Cross-origin restricted fields and CDN cache status remain unknown; no HEAD request is used to pretend it measures video playback. JS heap is not native decoder memory. In-flight transfers may not have a completed timing entry. Exact unused transfer bytes and h2-versus-h3 CDN comparisons require staging/network tracing; buffered seconds are not a byte estimate.
 
@@ -74,7 +74,7 @@ Responsive feed checks: 390, 768, 1440 and 1920 pixels wide, each 900 pixels tal
 
 Safari 26.5 is installed, but creating a WebDriver session was rejected because “Allow remote automation” is disabled. No Safari setting was changed. Firefox/Playwright WebKit are not installed. Safari, physical iOS, Firefox, real tab lifecycle, constrained mobile network behavior and production h2/h3 latency remain unverified. No npm/package.json build or linter command exists in this static project. Docker is unavailable on this host; the Docker COPY manifest was corrected to include every referenced JS dependency and is unit-tested, but an image build was not claimed.
 
-### Recorded local results
+### Recorded local results (before the immediate-activation follow-up)
 
 - **30 unit tests passed**, no failures/skips. All listed syntax checks and `git diff --check` passed.
 - Playback integration suite passed on Chromium **150.0.7871.63** (installed Brave). Existing settings browser suite passed.
@@ -90,6 +90,12 @@ These small-sample percentiles are not statistically qualified performance claim
 Only media 1 and 2 were requested before the first swipe in this run. Neighbor 2 crossed its three-second target to 5.435 buffered seconds, triggering the overshoot safeguard; next+2 was not admitted. The full suite recorded 20 local media requests and 24,800,338 server-written bytes across navigation, failure, reopening and rollback scenarios. Those totals include repeated test phases and are not a five-player byte cap. Returning two clips backward preserved object identity and produced no replacement request for the retained first source.
 
 Temporary verification artifacts (not deployed): [frame/transfer logs](/var/folders/vb/j0crsdq14132f72sz3m17sc40000gn/T/voxxly-playback-IFrtO4/telemetry.json), [390px screenshot](/var/folders/vb/j0crsdq14132f72sz3m17sc40000gn/T/voxxly-playback-IFrtO4/feed-390.png), [1440px screenshot](/var/folders/vb/j0crsdq14132f72sz3m17sc40000gn/T/voxxly-playback-IFrtO4/feed-1440.png). Temporary files may be removed by the OS. The 390px and 1440px layouts were also visually inspected from a prior passing run with the same layout.
+
+### Immediate-activation follow-up
+
+Removed the intentional wait of up to 150 ms between a swipe and incoming playback/source loading. Activation now happens synchronously alongside the existing slide animation, preserving its easing. Animation completion does not activate again. Muted autoplay retry is restricted to `NotAllowedError`; canceling a pending play with pause no longer restarts the clip.
+
+31 unit tests, syntax/diff checks and the Chromium playback suite passed after this change. Added checks verify activation/source assignment during the navigation event and that a pause during animation stays paused, including rollback mode. The latest local run measured seven warm activation-to-frame samples: p50 27.5 ms, sample p95 76.8 ms, under the same localhost conditions above. Logs: `/var/folders/vb/j0crsdq14132f72sz3m17sc40000gn/T/voxxly-playback-UA2aA2/telemetry.json`. This removes deliberate client waiting, not cold network/decode latency. Speculative downloading and queue-v2 rollout defaults are unchanged; no deployment was performed.
 
 ## Files changed
 

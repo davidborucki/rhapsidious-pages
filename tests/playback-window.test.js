@@ -87,7 +87,7 @@ test("buffer health uses the range containing current time, not the end of an un
   video.currentTime = 10;
   assert.equal(bufferedAhead(video), 0);
 });
-test("Save-Data, absent hints, slow links, iOS and low memory disable native speculation", () => {
+test("legacy two-ahead experiment excludes absent hints, slow links, iOS, Save-Data and low memory", () => {
   const fast = { userAgent: "Chrome", deviceMemory: 8, connection: { effectiveType: "4g", downlink: 10 } };
   assert.equal(allowSpeculation(fast, true), true);
   for (const nav of [{}, { ...fast, connection: null }, { ...fast, deviceMemory: 2 }, { ...fast, userAgent: "iPhone Chrome" }, { ...fast, connection: { ...fast.connection, saveData: true } }, { ...fast, connection: { effectiveType: "3g", downlink: 1 } }]) assert.equal(allowSpeculation(nav, true), false);

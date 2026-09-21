@@ -21,6 +21,8 @@
   const uploadConfig = config.uploads || {};
   const processingConfig = config.processing || {};
   const feedConfig = config.feed || {};
+  const playbackDebug = new URLSearchParams(location.search).get("playbackDebug") === "1";
+  const playbackTelemetry = feedConfig.playbackTelemetry === true || playbackDebug;
   const socialConfig = config.social || {};
   const searchConfig = config.search || {};
   const profileConfig = config.profile || {};
@@ -92,10 +94,30 @@
   let failedThumbnailUrls = new Set();
   let clipViewerState = null;
   let settingsCleanup = null;
-  if (feedConfig.playbackTelemetry) window.voxxlyPlaybackDiagnostics = function () {
+  if (playbackTelemetry) window.voxxlyPlaybackDiagnostics = function () {
     const pool = clipViewerState && clipViewerState.pool || feedPool;
     return pool ? pool.samples.slice() : [];
   };
+  if (playbackDebug) {
+    // Local, opt-in diagnostics usable on a phone without a remote inspector.
+    // No identifiers/URLs/tokens are sent to any analytics endpoint.
+    const panel = document.createElement("details");
+    panel.style.cssText = "position:fixed;z-index:1000;top:70px;left:10px;max-width:calc(100vw - 20px);max-height:55dvh;overflow:auto;background:#111;color:#fff;padding:10px;border:1px solid #777;font:12px monospace";
+    const summary = document.createElement("summary");
+    summary.textContent = "Playback diagnostics";
+    const output = document.createElement("pre");
+    output.style.cssText = "white-space:pre-wrap;margin:8px 0 0";
+    panel.append(summary, output);
+    document.body.appendChild(panel);
+    window.setInterval(function () {
+      const pool = clipViewerState && clipViewerState.pool || feedPool;
+      panel.hidden = !pool;
+      if (!pool || !panel.open) { output.textContent = ""; return; }
+      const frame = pool.samples.filter(sample => sample.type === "first-frame").at(-1);
+      const action = pool.samples.filter(sample => /^(prepare-next|neighbor-ready|prepare-cancelled)$/.test(sample.type)).at(-1);
+      output.textContent = JSON.stringify({ ...pool.snapshot(), lastFrameMs: frame && Math.round(frame.activationMs), lastFrameWarm: frame && frame.warm, lastPreparation: action && { type: action.type, reason: action.reason } }, null, 2);
+    }, 1000);
+  }
 
   function createFeedState(sharedClipId) {
     return {
@@ -1134,7 +1156,8 @@
       feedPool = new playback.NativePool({
         source: playbackSource,
         speculativeNative: feedConfig.speculativeNative === true,
-        telemetry: feedConfig.playbackTelemetry === true,
+        prepareNextClip: feedConfig.prepareNextClip === true,
+        telemetry: playbackTelemetry,
         onExpired: function () {
           if (feedState.queue && getRoute() === routes.feed) loadQueueFeed({ reconnect: true });
         },
@@ -3164,7 +3187,8 @@
       clipViewerState.pool = new playback.NativePool({
         source: playbackSource,
         speculativeNative: feedConfig.speculativeNative === true,
-        telemetry: feedConfig.playbackTelemetry === true,
+        prepareNextClip: feedConfig.prepareNextClip === true,
+        telemetry: playbackTelemetry,
         create: function (clip) {
           const video = document.createElement("video");
           video.className = "clip-viewer-video";

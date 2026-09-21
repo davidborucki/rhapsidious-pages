@@ -38,6 +38,9 @@ window.APP_CONFIG = {
     playbackWindow: true,
     // Opt in only after platform/transfer qualification; preload is not a byte cap.
     speculativeNative: false,
+    // Current-first, single-neighbor native attempt, including Safari. Rollback:
+    // false retains visited players but does not assign upcoming video sources.
+    prepareNextClip: true,
     playbackTelemetry: false,
     // Queue v2 requires the backend schema/flag rollout; never probe legacy feed early.
     queueV2: false,

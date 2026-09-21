@@ -1,5 +1,7 @@
 # Web playback window — implementation and rollout
 
+**September 20 Safari follow-up:** `feed.prepareNextClip: true` now enables a separate, guarded one-ahead attempt on browsers including Safari. The older two-ahead `speculativeNative` experiment below remains off. See [Safari preparation](SAFARI-PREPARATION.md) for the current defaults, cancellation rules, phone diagnostics, and outstanding delivery work; older measurements below describe the earlier implementation.
+
 Implementation date: September 20, 2026. Plain JavaScript; no framework, player library, backend/iOS edit, deployment, bucket write, or account configuration change. No AGENTS.md was found in the project or applicable ancestors. The preexisting untracked delivery-prompt documents were preserved.
 
 ## What ships enabled

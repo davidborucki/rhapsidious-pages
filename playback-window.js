@@ -117,6 +117,16 @@
       /Chrome|Chromium/.test(navigator.userAgent) && !/iPhone|iPad|iPod/.test(navigator.userAgent);
   }
 
+  // Missing connection hints are normal on Safari, not evidence of a slow link.
+  // Actual current-player health is checked separately before one-ahead admission.
+  function allowNextPreparation(navigator, enabled) {
+    const connection = navigator.connection;
+    return enabled === true && navigator.onLine !== false &&
+      !(navigator.deviceMemory && navigator.deviceMemory < 4) &&
+      !(connection && (connection.saveData || /^(slow-2g|2g|3g)$/.test(connection.effectiveType) ||
+        (Number.isFinite(connection.downlink) && connection.downlink < 1.5)));
+  }
+
   class NativePool {
     constructor(options) {
       this.options = options;
@@ -126,6 +136,9 @@
       this.connections = new Map();
       this.samples = [];
       this.closed = false;
+      this.preparationAttempts = new Set();
+      this.preparing = null;
+      this.preparationDisabled = false;
       this.scheduler = new WindowScheduler({
         key: clip => mediaKey(clip, options.source(clip)),
         create: (clip, key) => this.create(clip, key),
@@ -190,6 +203,8 @@
         this.tick();
       });
       on("canplay", () => { entry.waiting = false; this.tick(); });
+      on("loadedmetadata", () => this.record("metadata", entry, { sinceSourceMs: performance.now() - entry.sourceAt }));
+      on("loadeddata", () => this.record("loaded-data", entry, { sinceSourceMs: performance.now() - entry.sourceAt, bufferedSeconds: bufferedAhead(video) }));
       on("progress", this.tick);
       on("suspend", this.tick);
       on("error", () => {
@@ -203,11 +218,16 @@
       return entry;
     }
     reconcile(clips, index, direction) {
-      return this.scheduler.reconcile(clips, index, direction);
+      const entry = this.scheduler.reconcile(clips, index, direction);
+      this.preparationAttempts.forEach(key => {
+        if (!this.scheduler.entries.has(key)) this.preparationAttempts.delete(key);
+      });
+      // Establish only actual nearby media origins, without requesting media bytes.
+      this.scheduler.ordered.filter(item => Math.abs(item.offset) <= 1).forEach(item => this.preconnect(item.source));
+      return entry;
     }
-    ensureSource(entry) {
-      if (entry.video.hasAttribute("src") || entry.failed) return;
-      const origin = absoluteUrl(entry.source) && new URL(entry.source).origin;
+    preconnect(source) {
+      const origin = absoluteUrl(source) && new URL(source).origin;
       if (origin && origin !== location.origin && !this.connections.has(origin) && this.connections.size < 2) {
         const link = document.createElement("link");
         link.rel = "preconnect";
@@ -215,6 +235,11 @@
         document.head.appendChild(link);
         this.connections.set(origin, link);
       }
+    }
+    ensureSource(entry) {
+      if (entry.video.hasAttribute("src") || entry.failed) return;
+      this.preconnect(entry.source);
+      entry.sourceAt = performance.now();
       entry.video.src = entry.source;
       this.record("source", entry, { speculative: entry !== this.active });
     }
@@ -243,12 +268,15 @@
         this.cancelFrame(this.active);
       }
       this.active = entry;
+      if (this.preparing === entry) this.preparing = null;
+      this.healthySince = null;
       if (this.loader === entry) this.loader = null;
       const warm = entry.video.readyState >= 2 && bufferedAhead(entry.video) > 0;
       entry.visited = true;
       entry.presented = false;
       entry.activationAt = performance.now();
       entry.navigationAt = navigationAt || entry.activationAt;
+      this.record("activation", entry, { warm, readyState: entry.video.readyState, bufferedSeconds: bufferedAhead(entry.video), preparationAttempted: this.preparationAttempts.has(entry.key) });
       this.show(entry, true);
       entry.video.preload = "auto";
       this.ensureSource(entry);
@@ -287,6 +315,12 @@
         this.scheduler.ordered = this.scheduler.ordered.filter(entry => !expired.includes(entry));
         if (this.options.onExpired) this.options.onExpired();
       }
+      // The legacy two-ahead experiment stays independently opt-in. The default
+      // path admits only one neighbor, including browsers without network hints.
+      if (this.options.prepareNextClip && !this.options.speculativeNative) {
+        this.tickNextPreparation();
+        return;
+      }
       const active = this.active;
       const healthy = active && !active.failed && !active.waiting && !active.video.paused &&
         active.video.readyState >= 3 && bufferedAhead(active.video) >= Math.min(8, Math.max(0.5, active.video.duration - active.video.currentTime));
@@ -316,6 +350,78 @@
       candidate.video.preload = "auto";
       this.ensureSource(candidate);
     }
+    tickNextPreparation() {
+      const now = performance.now();
+      const active = this.active;
+      const healthy = active && !active.failed && !active.waiting && !active.video.paused &&
+        active.video.readyState >= 3 && bufferedAhead(active.video) >= Math.min(6, Math.max(0.5, active.video.duration - active.video.currentTime));
+      if (!healthy) this.healthySince = null;
+      else if (this.healthySince == null) this.healthySince = now;
+      const allowed = !this.suspended && !document.hidden && !this.preparationDisabled &&
+        allowNextPreparation(navigator, this.options.prepareNextClip);
+      const next = this.scheduler.ordered.find(entry => entry.offset === this.scheduler.direction);
+      const loader = this.preparing;
+      if (loader) {
+        const ahead = bufferedAhead(loader.video);
+        if (!loader.failed && loader.video.networkState !== 2 && (!allowed || !healthy || loader !== next)) {
+          // Already-idle buffers cost no competing transfer; preserve them when
+          // pausing/backgrounding instead of throwing away successful preparation.
+          loader.video.preload = "none";
+          if (loader !== next) this.preparing = null;
+          return;
+        }
+        if (!allowed || !healthy || loader !== next || loader.failed) {
+          this.cancelPreparation(loader, !allowed ? "suspended-or-constrained" : !healthy ? "current-needs-bandwidth" : loader.failed ? "media-error" : "direction-changed");
+          return;
+        }
+        if (!loader.prepared && ahead >= Math.min(2, loader.video.duration || 2) && loader.video.readyState >= 2) {
+          loader.prepared = true;
+          loader.preparedAt = now;
+          loader.video.preload = "none";
+          this.record("neighbor-ready", loader, { bufferedSeconds: ahead, elapsedMs: now - loader.sourceAt });
+        }
+        // Hints cannot enforce bytes. If the native loader ignores the stop hint,
+        // evict this unused entry (never the active/visited player), releasing src.
+        if (ahead > 4 || (loader.prepared && loader.video.networkState === 2 && now - loader.preparedAt > 600)) {
+          this.preparationDisabled = true;
+          this.cancelPreparation(loader, "native-download-overrun");
+        } else if (now - loader.sourceAt > 4000 && loader.video.networkState === 2) {
+          this.cancelPreparation(loader, "preparation-timeout");
+        }
+        // Retain an idle metadata-only player too; do not claim it is frame-ready.
+        return;
+      }
+      if (!allowed || !healthy || now - this.healthySince < 750 || !next || next.visited || next.failed ||
+        this.preparationAttempts.has(next.key) ||
+        this.scheduler.ordered.some(entry => entry !== active && entry.video.networkState === 2)) return;
+      this.preparationAttempts.add(next.key);
+      this.preparing = next;
+      next.video.preload = "auto";
+      this.record("prepare-next", next, { currentBufferSeconds: bufferedAhead(active.video) });
+      this.ensureSource(next);
+    }
+    cancelPreparation(entry, reason) {
+      if (!entry || entry === this.active || entry.visited) return;
+      this.record("prepare-cancelled", entry, { reason, bufferedSeconds: bufferedAhead(entry.video) });
+      this.scheduler.entries.delete(entry.key);
+      this.scheduler.ordered = this.scheduler.ordered.filter(item => item !== entry);
+      // The next reconcile recreates the wrapper if it is needed for navigation.
+      // Attempts remain marked until the clip leaves the window, preventing loops.
+      this.evict(entry);
+    }
+    snapshot() {
+      return {
+        preparationMode: this.options.speculativeNative ? "legacy-two-ahead" : this.options.prepareNextClip ? "one-ahead" : "off",
+        prepareNextClip: Boolean(this.options.prepareNextClip),
+        preparationDisabled: this.preparationDisabled,
+        hidden: this.suspended || document.hidden,
+        entries: this.scheduler.ordered.map(entry => ({ id: entry.clip.id, offset: entry.offset,
+          current: entry === this.active, sourceAssigned: entry.video.hasAttribute("src"),
+          readyState: entry.video.readyState, bufferedSeconds: Math.round(bufferedAhead(entry.video) * 100) / 100,
+          paused: entry.video.paused, waiting: entry.waiting, failed: entry.failed,
+          preparationAttempted: this.preparationAttempts.has(entry.key) }))
+      };
+    }
     suspend(value) {
       this.suspended = value;
       this.scheduler.ordered.forEach(entry => {
@@ -335,6 +441,7 @@
       entry.frameId = entry.paintId = entry.frameFallback = null;
     }
     evict(entry) {
+      if (this.preparing === entry) this.preparing = null;
       if (this.active === entry) this.active = null;
       if (this.loader === entry) this.loader = null;
       this.record("evict", entry, { unused: !entry.visited, bufferedSeconds: bufferedAhead(entry.video) });
@@ -353,10 +460,11 @@
       clearInterval(this.timer);
       if (this.observer) this.observer.disconnect();
       this.scheduler.destroy();
+      this.preparationAttempts.clear();
       this.connections.forEach(link => link.remove());
       this.connections.clear();
     }
   }
 
-  return { WindowScheduler, NativePool, sourceFor, mediaKey, bufferedAhead, allowSpeculation, absoluteUrl };
+  return { WindowScheduler, NativePool, sourceFor, mediaKey, bufferedAhead, allowSpeculation, allowNextPreparation, absoluteUrl };
 });

@@ -237,6 +237,68 @@ const { execFileSync } = require("node:child_process");
     await page.waitForURL("**/#/login");
     assert.equal(await page.locator("video").count(), 0);
     assert.deepEqual(failures, []);
+    // Default one-ahead path with absent network hints (as on Safari), exercised
+    // using real Chromium media transfers. This is NOT a Safari engine benchmark.
+    const nextPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    nextPage.on("pageerror", error => failures.push(error.message));
+    const nextWatches = [];
+    const transferStart = transfers.length;
+    const nextReports = [];
+    await nextPage.addInitScript(() => {
+      localStorage.setItem("voxxly_web_access_token", "fixture-token");
+      Object.defineProperty(navigator, "connection", { value: undefined });
+    });
+    await nextPage.route("https://dev-backend-withered-thunder-4589.fly.dev/**", route => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === "/iosclips/interactions") nextWatches.push(route.request().postDataJSON());
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(pathname === "/auth/me" ? { id: 1, username: "test" } : pathname === "/iosclips/feed" ? clips : []) });
+    });
+    await nextPage.goto(origin + "/?playbackDebug=1#/feed");
+    await nextPage.waitForSelector(active);
+    await nextPage.locator(active).evaluate(video => video.play());
+    await nextPage.waitForFunction(() => {
+      const next = document.querySelector('[data-clip-id="2"] video');
+      return next && next.readyState >= 2 && next.buffered.length && next.buffered.end(0) > 0;
+    });
+    await nextPage.evaluate(() => { window.preparedVideo = document.querySelector('[data-clip-id="2"] video'); window.preparedSource = preparedVideo.src; });
+    assert.equal(nextWatches.length, 0, 'default preparation emits no watch events');
+    assert.equal(await nextPage.evaluate(() => [...document.querySelectorAll('video')].filter(video => !video.paused).length), 1);
+    assert.ok(transfers.slice(transferStart).some(item => item.path === '/media/2.mp4'), 'upcoming media actually requested before swipe');
+    assert.ok(!transfers.slice(transferStart).some(item => item.path === '/media/3.mp4'), 'next+2 not downloaded');
+    await nextPage.keyboard.press('ArrowDown');
+    await nextPage.waitForFunction(() => document.querySelector('.soundbite-card.is-active')?.dataset.clipId === '2');
+    assert.equal(await nextPage.evaluate(() => document.querySelector('.soundbite-card.is-active video') === preparedVideo && preparedVideo.src === preparedSource), true);
+    await nextPage.waitForFunction(() => window.voxxlyPlaybackDiagnostics().some(item => item.type === 'first-frame' && item.clipId === 2));
+    const oneAheadTelemetry = await nextPage.evaluate(() => window.voxxlyPlaybackDiagnostics());
+    assert.equal(oneAheadTelemetry.find(item => item.type === 'first-frame' && item.clipId === 2).warm, true);
+    await nextPage.getByText('Playback diagnostics', { exact: true }).click();
+    await nextPage.waitForFunction(() => document.querySelector('details pre')?.textContent.includes('bufferedSeconds'));
+    await nextPage.screenshot({ path: path.join(directory, 'one-ahead-diagnostics.png') });
+    // Start a fresh pool, leave its neighbor offscreen, and force current waiting.
+    // Verify cancellation on the native element and actual server-written bytes.
+    const cancellationStart = transfers.length;
+    await nextPage.reload();
+    await nextPage.waitForSelector(active);
+    await nextPage.locator(active).evaluate(video => video.play());
+    await nextPage.waitForFunction(() => {
+      const video = document.querySelector('[data-clip-id="2"] video');
+      return video?.networkState === 2 && video.readyState >= 2;
+    });
+    const cancellation = await nextPage.evaluate(() => {
+      const current = document.querySelector('.soundbite-card.is-active video');
+      const next = document.querySelector('[data-clip-id="2"] video');
+      const source = current.src;
+      current.dispatchEvent(new Event('waiting'));
+      return { cancelled: !next.hasAttribute('src'), currentPreserved: current.src === source && !current.paused };
+    });
+    assert.deepEqual(cancellation, { cancelled: true, currentPreserved: true });
+    await nextPage.waitForTimeout(600);
+    const cancelledTransfers = transfers.slice(cancellationStart).filter(item => item.path === '/media/2.mp4');
+    assert.ok(cancelledTransfers.length > 0 && cancelledTransfers.every(item => item.aborted && item.bytes < media.length), 'unused native download stops before the full MP4 is transferred');
+    assert.ok(!transfers.slice(cancellationStart).some(item => item.path === '/media/3.mp4'));
+    nextReports.push({ cancellation, cancelledTransfers });
+    await nextPage.close();
+    fs.writeFileSync(path.join(directory, 'one-ahead.json'), JSON.stringify({ telemetry: oneAheadTelemetry, cancellation: nextReports, transfers: transfers.slice(transferStart) }, null, 2));
     // Exercise the exact opt-in reserve/ack contract across a complete cycle.
     const queuePage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     queuePage.on("pageerror", error => failures.push(error.message));

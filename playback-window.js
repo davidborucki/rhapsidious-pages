@@ -361,12 +361,15 @@
         allowNextPreparation(navigator, this.options.prepareNextClip);
       const next = this.scheduler.ordered.find(entry => entry.offset === this.scheduler.direction);
       const loader = this.preparing;
+      this.preparationReason = !allowed ? this.preparationDisabled ? "disabled-after-overrun" : "hidden-offline-or-constrained" :
+        !healthy ? "current-needs-buffer-or-playback" : "current-buffer-stabilizing";
       if (loader) {
         const ahead = bufferedAhead(loader.video);
         if (!loader.failed && loader.video.networkState !== 2 && (!allowed || !healthy || loader !== next)) {
           // Already-idle buffers cost no competing transfer; preserve them when
           // pausing/backgrounding instead of throwing away successful preparation.
           loader.video.preload = "none";
+          this.preparationReason = "retaining-idle-neighbor";
           if (loader !== next) this.preparing = null;
           return;
         }
@@ -389,11 +392,19 @@
           this.cancelPreparation(loader, "preparation-timeout");
         }
         // Retain an idle metadata-only player too; do not claim it is frame-ready.
+        if (this.preparing) this.preparationReason = loader.prepared ? "neighbor-ready" : loader.video.readyState === 1 && loader.video.networkState !== 2 ? "metadata-only" : "preparing-next";
         return;
       }
-      if (!allowed || !healthy || now - this.healthySince < 750 || !next || next.visited || next.failed ||
-        this.preparationAttempts.has(next.key) ||
-        this.scheduler.ordered.some(entry => entry !== active && entry.video.networkState === 2)) return;
+      if (!allowed || !healthy || now - this.healthySince < 750) return;
+      if (!next || next.visited || next.failed || this.preparationAttempts.has(next.key)) {
+        this.preparationReason = !next ? "no-next-clip-in-batch" : next.visited ? "neighbor-already-visited" : "neighbor-failed-or-attempted";
+        return;
+      }
+      if (this.scheduler.ordered.some(entry => entry !== active && entry.video.networkState === 2)) {
+        this.preparationReason = "previous-native-download-still-running";
+        return;
+      }
+      this.preparationReason = "preparing-next";
       this.preparationAttempts.add(next.key);
       this.preparing = next;
       next.video.preload = "auto";
@@ -403,6 +414,7 @@
     cancelPreparation(entry, reason) {
       if (!entry || entry === this.active || entry.visited) return;
       this.record("prepare-cancelled", entry, { reason, bufferedSeconds: bufferedAhead(entry.video) });
+      this.preparationReason = reason;
       this.scheduler.entries.delete(entry.key);
       this.scheduler.ordered = this.scheduler.ordered.filter(item => item !== entry);
       // The next reconcile recreates the wrapper if it is needed for navigation.
@@ -414,11 +426,14 @@
         preparationMode: this.options.speculativeNative ? "legacy-two-ahead" : this.options.prepareNextClip ? "one-ahead" : "off",
         prepareNextClip: Boolean(this.options.prepareNextClip),
         preparationDisabled: this.preparationDisabled,
+        preparationReason: this.preparationReason || "not-started",
+        waitingForFirstFrameMs: this.active && !this.active.presented ? Math.round(performance.now() - this.active.activationAt) : null,
         hidden: this.suspended || document.hidden,
         entries: this.scheduler.ordered.map(entry => ({ id: entry.clip.id, offset: entry.offset,
           current: entry === this.active, sourceAssigned: entry.video.hasAttribute("src"),
           readyState: entry.video.readyState, bufferedSeconds: Math.round(bufferedAhead(entry.video) * 100) / 100,
-          paused: entry.video.paused, waiting: entry.waiting, failed: entry.failed,
+          networkState: entry.video.networkState,
+          paused: entry.video.paused, muted: entry.video.muted, waiting: entry.waiting, failed: entry.failed,
           preparationAttempted: this.preparationAttempts.has(entry.key) }))
       };
     }

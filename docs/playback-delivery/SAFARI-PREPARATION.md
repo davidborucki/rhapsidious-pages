@@ -1,5 +1,15 @@
 # One-ahead native preparation, including Safari
 
+## Mobile controls and audio follow-up
+
+The mobile feed volume control is four pixels lower; the action rail is shifted down 62 pixels (one Watch slot) with a short-screen clamp above navigation; captions are 12 pixels lower with eight pixels of clearance above the bottom navigation. Desktop positioning is unchanged.
+
+Feed playback now guards each play request against stale rejections. Navigation no longer retries/unmutes the outgoing video before starting the incoming one. A genuine NotAllowedError can still require muted playback under browser policy, but it does not change the user's sound preference: a **Tap for sound** button appears, and tapping the video retries the preferred sound state rather than pausing it. Deliberate mute remains in effect through pause/resume and navigation. This is policy-aware recovery, not a bypass of Safari restrictions. WebKit documents [sound/gesture requirements](https://webkit.org/blog/6784/new-video-policies-for-ios/) and has a [swipe-versus-tap activation report](https://bugs.webkit.org/show_bug.cgi?id=212117); that historical report alone does not establish behavior on every current iPhone.
+
+Diagnostics now put last-frame information first and include `soundRequested`, actual `muted`, `networkState`, `waitingForFirstFrameMs`, and `preparationReason`. Reasons distinguish current buffer gating, a previous native download still running, metadata-only readiness, no next clip in the batch, and canceled/disabled preparation. The live public configuration was read-only verified with `prepareNextClip: true` and version `20260920-3`; the user's remaining Safari delay is not established as a configuration issue. No buffer thresholds were blindly increased. Physical-phone diagnostics and possibly the delivery work below are still required; this follow-up does not claim to fix the reported cellular latency.
+
+Verification: 43 unit tests passed, syntax/diff checks passed, and the Chromium playback browser suite passed with added mobile geometry, policy-muted tap recovery, stale-rejection, and intentional-mute navigation assertions. Mobile screenshots at 320 and 390 pixels were visually inspected. Latest browser artifacts: `/var/folders/vb/j0crsdq14132f72sz3m17sc40000gn/T/voxxly-playback-w7zIGY`. No deployment or backend/CDN change was made.
+
 ## What changed
 
 `feed.prepareNextClip: true` enables an attempt to prepare the immediate next clip in the navigation direction in feed and saved/profile viewers. It no longer requires Chromium or `navigator.connection`. Missing hints are not treated as a slow link. Known Save-Data, offline, 2g/3g, estimated downlink below 1.5 Mbps, or reported memory below 4 GB prevent admission. Missing hints do **not** prove the phone is on Wi-Fi, fast cellular, or has Low Data Mode disabled.

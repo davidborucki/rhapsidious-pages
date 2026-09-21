@@ -186,6 +186,9 @@ const { execFileSync } = require("node:child_process");
         assert.ok(layout.rail.x > 0 && layout.rail.right <= width && layout.rail.bottom < layout.nav.y, 'rail stays inside video, above navigation');
         assert.ok(layout.watch.y >= layout.volume.bottom && layout.watch.right <= width, 'optional Watch remains onscreen');
         assert.ok(layout.copy.bottom < layout.nav.y && layout.copy.right < layout.rail.x, 'caption clears navigation and action rail');
+        assert.ok(Math.abs(layout.volume.y - 20) < 1, 'mobile volume control moved down four pixels');
+        assert.ok(Math.abs(layout.nav.y - layout.copy.bottom - 8) < 1, 'caption sits eight pixels above bottom navigation');
+        assert.ok(Math.abs(layout.rail.y - Math.min(height / 2 + 62, height - 210) + layout.rail.height / 2) < 1, 'mobile rail shifts down one Watch slot, clamped on short screens');
         assert.ok(layout.nav.bottom <= height && layout.nav.bottom >= height - 16, 'bottom navigation stays available');
       } else {
         assert.notEqual(layout.header, 'none', 'desktop header remains visible');
@@ -379,10 +382,35 @@ const { execFileSync } = require("node:child_process");
     await rejected.goto(origin + "/#/feed");
     await rejected.waitForFunction(() => { const video = document.querySelector(".soundbite-card.is-active video"); return video && video.muted && !video.paused && video.readyState >= 2; });
     assert.equal(await rejected.evaluate(() => window.rejections), 1);
+    assert.equal(await rejected.locator('.is-active [data-feed-audio-prompt]').isVisible(), true);
+    await rejected.locator(active).click();
+    assert.equal(await rejected.locator(active).evaluate(video => !video.muted && !video.paused), true, 'tap on a policy-muted video restores requested audio, not pause');
+    assert.equal(await rejected.locator('.is-active [data-feed-audio-prompt]').isVisible(), false);
+    // Delay one policy rejection until a later tap has already started playback.
+    await rejected.evaluate(() => {
+      const play = HTMLMediaElement.prototype.play;
+      window.holdPlay = true;
+      HTMLMediaElement.prototype.play = function () {
+        if (window.holdPlay && !this.muted) {
+          window.holdPlay = false;
+          return new Promise((resolve, reject) => { window.rejectOldPlay = reject; });
+        }
+        return play.call(this);
+      };
+    });
     // Reduced-motion remains a one-clip transition, with no native controls added.
     await rejected.emulateMedia({ reducedMotion: "reduce" });
     await rejected.keyboard.press("ArrowDown");
     await rejected.waitForFunction(() => document.querySelector(".soundbite-card.is-active")?.dataset.clipId === "2");
+    await rejected.locator(active).click();
+    await rejected.evaluate(() => window.rejectOldPlay(new DOMException('Old request', 'NotAllowedError')));
+    assert.equal(await rejected.locator(active).evaluate(video => !video.muted && !video.paused), true, 'stale rejection never mutes a newer successful play');
+    await rejected.locator('.is-active [data-feed-mute-toggle]').click();
+    await rejected.locator(active).click();
+    await rejected.locator(active).click();
+    await rejected.keyboard.press('ArrowDown');
+    await rejected.waitForFunction(() => document.querySelector('.soundbite-card.is-active')?.dataset.clipId === '3');
+    assert.equal(await rejected.locator(active).evaluate(video => video.muted), true, 'intentional mute survives pause/resume and navigation');
     assert.equal(await rejected.locator("video[controls]").count(), 0);
     await rejected.close();
     const rollback = await browser.newPage();

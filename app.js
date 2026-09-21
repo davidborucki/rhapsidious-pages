@@ -72,6 +72,7 @@
   let feedTransitionCleanup = null;
   let feedAudioEnabled = true;
   let feedVolume = 1;
+  const feedPlayRequests = new WeakMap();
   let creatorCache = new Map();
   let creatorRequests = new Map();
   let feedPool = null;
@@ -115,7 +116,7 @@
       if (!pool || !panel.open) { output.textContent = ""; return; }
       const frame = pool.samples.filter(sample => sample.type === "first-frame").at(-1);
       const action = pool.samples.filter(sample => /^(prepare-next|neighbor-ready|prepare-cancelled)$/.test(sample.type)).at(-1);
-      output.textContent = JSON.stringify({ ...pool.snapshot(), lastFrameMs: frame && Math.round(frame.activationMs), lastFrameWarm: frame && frame.warm, lastPreparation: action && { type: action.type, reason: action.reason } }, null, 2);
+      output.textContent = JSON.stringify({ lastFrameClipId: frame && frame.clipId, lastFrameMs: frame && Math.round(frame.activationMs), lastFrameWarm: frame && frame.warm, soundRequested: feedAudioEnabled, lastPreparation: action && { type: action.type, reason: action.reason }, ...pool.snapshot() }, null, 2);
     }, 1000);
   }
 
@@ -1055,6 +1056,7 @@
             <svg viewBox="0 0 24 24"><path d="m6.5 5 11 7-11 7V5Z"></path></svg>
           </span>
           ${renderVideoVolumeControl(item.name)}
+          <button class="feed-audio-prompt hidden" type="button" data-feed-audio-prompt>Tap for sound</button>
           ${item.isMature || item.mature
             ? `<div class="soundbite-labels"><span class="badge badge-warning">Mature${item.minimumAge ? ` · ${escapeHtml(item.minimumAge)}+` : ""}</span></div>`
             : ""}
@@ -1862,16 +1864,31 @@
     await loadMoreFeed({ fromEnd: true, restartFromEnd: true });
   }
 
-  function enableFeedAudio() {
-    // Retry playback after a gesture while preserving the user's audio preference.
-    applyFeedAudioState();
-    const video = app.querySelector("[data-feed-card].is-active [data-feed-video]");
-    if (!video) {
-      return;
-    }
-    if (video.paused) {
+  function playFeedVideo(card) {
+    const video = card.querySelector("[data-feed-video]");
+    if (!video || !card.classList.contains("is-active") || document.hidden) return;
+    const request = (feedPlayRequests.get(video) || 0) + 1;
+    feedPlayRequests.set(video, request);
+    const stillCurrent = () => feedPlayRequests.get(video) === request && card.isConnected &&
+      card.classList.contains("is-active") && !document.hidden;
+    video.volume = feedVolume;
+    video.muted = !feedAudioEnabled;
+    delete card.dataset.audioBlocked;
+    updateFeedVolumeControl(card, video);
+    video.play().catch(function (error) {
+      // A late rejection from an older activation must not mute a newer play or
+      // override a pause/volume choice. AbortError is not an autoplay rejection.
+      if (!stillCurrent() || !error || error.name !== "NotAllowedError") return;
+      if (feedPool) {
+        const entry = feedPool.scheduler.ordered.find(item => item.video === video);
+        feedPool.record("autoplay-blocked", entry, { requestedSound: feedAudioEnabled });
+      }
+      if (feedAudioEnabled) card.dataset.audioBlocked = "true";
+      video.muted = true;
+      updateFeedVolumeControl(card, video);
+      // Keep visuals moving when permitted; never change the user's sound preference.
       video.play().catch(function () {});
-    }
+    });
   }
 
   function renderVideoVolumeControl(name) {
@@ -1914,6 +1931,8 @@
     button.setAttribute("aria-label", `${isMuted ? "Unmute" : "Mute"} ${title}`);
     slider.setAttribute("aria-label", `Volume for ${title}`);
     slider.value = String(isMuted ? 0 : Math.round(video.volume * 100));
+    const audioPrompt = card.querySelector("[data-feed-audio-prompt]");
+    if (audioPrompt) audioPrompt.classList.toggle("hidden", !(card.dataset.audioBlocked === "true" && feedAudioEnabled && isMuted));
   }
 
   function applyFeedAudioState() {
@@ -1922,6 +1941,8 @@
       if (!video) {
         return;
       }
+      feedPlayRequests.set(video, (feedPlayRequests.get(video) || 0) + 1);
+      delete card.dataset.audioBlocked;
       video.volume = feedVolume;
       video.muted = !feedAudioEnabled || !card.classList.contains("is-active");
       updateFeedVolumeControl(card, video);
@@ -1949,12 +1970,15 @@
     button.addEventListener("click", function (event) {
       event.stopPropagation();
       const activeVideo = card.querySelector("[data-clip-viewer-video]") || video;
+      const wasBlocked = card.dataset.audioBlocked === "true";
       feedAudioEnabled = activeVideo.muted || activeVideo.volume === 0;
       applyFeedAudioState();
+      if (feedAudioEnabled && card.matches("[data-feed-card]") && (wasBlocked || !activeVideo.paused)) playFeedVideo(card);
     });
     slider.addEventListener("input", function (event) {
       event.stopPropagation();
       const nextVolume = Math.max(0, Math.min(1, Number(slider.value) / 100));
+      const wasBlocked = card.dataset.audioBlocked === "true";
       if (nextVolume === 0) {
         feedAudioEnabled = false;
       } else {
@@ -1962,6 +1986,7 @@
         feedAudioEnabled = true;
       }
       applyFeedAudioState();
+      if (feedAudioEnabled && card.matches("[data-feed-card]") && (wasBlocked || !video.paused)) playFeedVideo(card);
     });
     control.addEventListener("click", function (event) {
       event.stopPropagation();
@@ -2144,7 +2169,6 @@
         return;
       }
       event.preventDefault();
-      enableFeedAudio();
       const now = window.performance.now();
       const elapsed = Math.max(8, now - lastWheelTime);
       const magnitude = Math.abs(event.deltaY);
@@ -2198,7 +2222,6 @@
       const distance = touchStartY - event.changedTouches[0].clientY;
       touchStartY = null;
       if (Math.abs(distance) >= 48) {
-        enableFeedAudio();
         const elapsed = Math.max(40, window.performance.now() - touchStartTime);
         const velocity = Math.min(1, Math.abs(distance) / elapsed / 1.2 + Math.abs(distance) / 400);
         navigateFeedBy(distance > 0 ? 1 : -1, velocity);
@@ -2214,11 +2237,9 @@
       }
       if (event.key === "ArrowDown" || event.key === "PageDown") {
         event.preventDefault();
-        enableFeedAudio();
         navigateFeedBy(1, 0.55);
       } else if (event.key === "ArrowUp" || event.key === "PageUp") {
         event.preventDefault();
-        enableFeedAudio();
         navigateFeedBy(-1, 0.55);
       }
     };
@@ -2254,22 +2275,9 @@
         return;
       }
       if (isActive) {
-        if (document.hidden) return;
-        video.volume = feedVolume;
-        video.muted = !feedAudioEnabled;
-        updateFeedVolumeControl(candidate, video);
-        video.play().catch(function (error) {
-          // An intentional pause aborts a pending play(). It is not an autoplay
-          // denial and must never restart the video through the muted retry.
-          if (!error || error.name !== "NotAllowedError") return;
-          if (!candidate.isConnected || !candidate.classList.contains("is-active") || document.hidden) return;
-          if (!video.muted) {
-            video.muted = true;
-            updateFeedVolumeControl(candidate, video);
-            video.play().catch(function () {});
-          }
-        });
+        playFeedVideo(candidate);
       } else {
+        feedPlayRequests.set(video, (feedPlayRequests.get(video) || 0) + 1);
         video.muted = true;
         if (!video.paused) video.pause();
       }
@@ -2299,12 +2307,18 @@
         updateFeedVolumeControl(card, video);
       };
       const togglePlayback = function () {
-        if (video.paused) {
-          video.play().catch(function () {});
+        if (video.paused || (feedAudioEnabled && card.dataset.audioBlocked === "true")) {
+          playFeedVideo(card);
         } else {
+          feedPlayRequests.set(video, (feedPlayRequests.get(video) || 0) + 1);
           video.pause();
         }
       };
+      card.querySelector("[data-feed-audio-prompt]").addEventListener("click", function (event) {
+        event.stopPropagation();
+        playFeedVideo(card);
+        video.focus({ preventScroll: true });
+      });
       video.addEventListener("click", togglePlayback);
       video.addEventListener("keydown", function (event) {
         if (event.key === "Enter" || event.key === " ") {

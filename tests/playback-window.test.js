@@ -196,5 +196,8 @@ test("feed transition starts playback synchronously, without a delayed or duplic
   assert.equal((transition.match(/activateFeedCard\(incomingCard\)/g) || []).length, 1);
   assert.ok(transition.indexOf("activateFeedCard(incomingCard)") < transition.indexOf("feedAnimationPromise = Promise.all"));
   const activation = source.slice(source.indexOf("function activateFeedCard("), source.indexOf("function bindFeedPlayers("));
-  assert.match(activation, /error\.name !== "NotAllowedError"/);
+  assert.match(activation, /playFeedVideo\(candidate\)/);
+  const request = source.slice(source.indexOf("function playFeedVideo("), source.indexOf("function renderVideoVolumeControl("));
+  assert.match(request, /error\.name !== "NotAllowedError"/);
+  assert.match(request, /feedPlayRequests\.get\(video\) === request/);
 });

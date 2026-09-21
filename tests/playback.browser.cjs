@@ -61,6 +61,7 @@ const { execFileSync } = require("node:child_process");
     let feeds = 0;
     let creatorCalls = 0;
     const clips = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, iosUserId: 2, name: `Clip ${i + 1}`, streamUrl: `${origin}/media/${i + 1}.mp4`, thumbnailUrl: null }));
+    clips[3].fullEpisodeFilepath = `${origin}/media/episode.mp4`;
     await page.route("**/config.js*", async route => {
       const source = fs.readFileSync(path.join(root, "config.js"), "utf8");
       await route.fulfill({ contentType: "text/javascript", body: source + "\nAPP_CONFIG.feed.playbackTelemetry=true; APP_CONFIG.feed.speculativeNative=true;" });
@@ -160,9 +161,37 @@ const { execFileSync } = require("node:child_process");
       Object.defineProperty(document, "hidden", { configurable: true, value: false });
       document.dispatchEvent(new Event("visibilitychange"));
     });
-    for (const width of [390, 768, 1440, 1920]) {
-      await page.setViewportSize({ width, height: 900 });
+    for (const [width, height] of [[320, 568], [390, 844], [430, 932], [760, 900], [768, 900], [1440, 900], [1920, 900]]) {
+      await page.setViewportSize({ width, height });
       assert.equal(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1 && document.documentElement.scrollWidth <= innerWidth + 1), true, `no long scroll page at ${width}`);
+      const layout = await page.evaluate(() => {
+        const card = document.querySelector('.soundbite-card.is-active');
+        const rect = selector => {
+          const node = card.querySelector(selector) || document.querySelector(selector);
+          const { x, y, width, height, right, bottom } = node.getBoundingClientRect();
+          return { x, y, width, height, right, bottom };
+        };
+        return {
+          video: rect('video'), rail: rect('.feed-action-rail'), watch: rect('.feed-watch-action'),
+          copy: rect('.feed-video-copy'), nav: rect('.primary-nav'), volume: rect('.feed-volume-control'),
+          header: getComputedStyle(document.querySelector('.site-header')).display,
+          fit: getComputedStyle(card.querySelector('video')).objectFit,
+        };
+      });
+      if (width <= 760) {
+        assert.equal(layout.header, 'none', 'mobile feed hides logo and account bar');
+        assert.equal(layout.fit, 'cover');
+        assert.ok(Math.abs(layout.video.x) < 1 && Math.abs(layout.video.y) < 1, 'video starts at viewport origin');
+        assert.ok(Math.abs(layout.video.width - width) < 1 && Math.abs(layout.video.height - height) < 1, `video fills ${width}x${height} dynamic viewport: ${JSON.stringify(layout.video)}`);
+        assert.ok(layout.rail.x > 0 && layout.rail.right <= width && layout.rail.bottom < layout.nav.y, 'rail stays inside video, above navigation');
+        assert.ok(layout.watch.y >= layout.volume.bottom && layout.watch.right <= width, 'optional Watch remains onscreen');
+        assert.ok(layout.copy.bottom < layout.nav.y && layout.copy.right < layout.rail.x, 'caption clears navigation and action rail');
+        assert.ok(layout.nav.bottom <= height && layout.nav.bottom >= height - 16, 'bottom navigation stays available');
+      } else {
+        assert.notEqual(layout.header, 'none', 'desktop header remains visible');
+        assert.equal(layout.fit, 'contain');
+        assert.ok(layout.rail.x >= layout.video.right, 'desktop rail remains outside video');
+      }
       await page.screenshot({ path: path.join(directory, `feed-${width}.png`) });
     }
     const telemetry = await page.evaluate(() => window.voxxlyPlaybackDiagnostics());
@@ -179,7 +208,9 @@ const { execFileSync } = require("node:child_process");
     assert.equal(transfers.filter(item => item.path === "/media/7.mp4").length, failedRequests, "failed native entry doesn't auto-retry");
     offline = false;
     delay = 80;
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(origin + "/#/saved");
+    assert.equal(await page.locator('.site-header').isVisible(), true, 'mobile Saved retains the account header');
     await page.locator("[data-view-clip]").first().click();
     await page.waitForSelector("[data-clip-viewer-video]");
     await page.evaluate(() => { window.viewerFirst = document.querySelector("[data-clip-viewer-video]"); });
@@ -191,6 +222,7 @@ const { execFileSync } = require("node:child_process");
     await page.keyboard.press("Escape");
     assert.equal(await page.locator("video").count(), 0);
     await page.goto(origin + "/#/profile");
+    assert.equal(await page.locator('.site-header').isVisible(), true, 'mobile Profile retains the account header');
     await page.locator("[data-view-clip]").first().click();
     await page.waitForSelector("[data-clip-viewer-video]");
     await page.evaluate(() => { window.profileFirst = document.querySelector("[data-clip-viewer-video]"); });
@@ -198,6 +230,7 @@ const { execFileSync } = require("node:child_process");
     await page.keyboard.press("ArrowLeft");
     assert.equal(await page.evaluate(() => profileFirst === document.querySelector("[data-clip-viewer-video]") && !videoLoadCalls.get(profileFirst)), true);
     await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(origin + "/#/feed");
     await page.waitForSelector(active);
     await page.getByRole("button", { name: "Log out" }).click();

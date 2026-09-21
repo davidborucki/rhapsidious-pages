@@ -2578,6 +2578,108 @@ html.clip-viewer-open body {
   }
 }
 
+/* Match the bottom-navigation breakpoint; desktop keeps its portrait frame
+   and outside action rail. Use available viewport size, not device sniffing. */
+@media (max-width: 760px) {
+  .feed-route .site-header {
+    display: none;
+  }
+
+  .feed-route .feed-page {
+    width: 100%;
+    height: 100dvh;
+    margin: 0;
+    padding: 0;
+  }
+
+  .feed-route .feed-page,
+  .feed-route .feed-list,
+  .feed-route .feed-slide {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .feed-route .soundbite-card {
+    width: 100%;
+    height: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .feed-route .soundbite-media {
+    min-height: 0;
+    aspect-ratio: auto;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .feed-route .soundbite-video {
+    /* Keep the video's intrinsic 9:16 size from expanding the grid track. */
+    position: absolute;
+    inset: 0;
+    object-fit: cover;
+  }
+
+  .feed-route .feed-ambient-glow {
+    display: none;
+  }
+
+  .feed-route .feed-action-rail {
+    position: absolute;
+    z-index: 4;
+    grid-column: 1;
+    top: 50%;
+    right: calc(8px + env(safe-area-inset-right, 0px));
+    width: 58px;
+    gap: 10px;
+    transform: translateY(-50%);
+  }
+
+  .feed-route .feed-creator-avatar {
+    width: 46px;
+    height: 46px;
+  }
+
+  .feed-route .social-action {
+    width: 58px;
+    min-height: 52px;
+  }
+
+  .feed-route .feed-watch-action {
+    bottom: calc(100% + 10px);
+  }
+
+  .feed-route .feed-video-copy {
+    left: calc(16px + env(safe-area-inset-left, 0px));
+    right: calc(80px + env(safe-area-inset-right, 0px));
+    bottom: calc(100px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .feed-route .feed-overlay-title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+    font-size: clamp(1.3rem, 5vw, 1.8rem);
+  }
+
+  .feed-route .feed-volume-control {
+    top: calc(16px + env(safe-area-inset-top, 0px));
+    left: calc(16px + env(safe-area-inset-left, 0px));
+  }
+
+  .feed-route .primary-nav {
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .feed-route .feed-page > #feedInlineStatus {
+    bottom: calc(100px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .feed-list.is-fetching-more .feed-slide {
     animation: none;

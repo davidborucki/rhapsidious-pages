@@ -2113,14 +2113,18 @@ html.clip-viewer-open body {
 .toast-region {
   position: fixed;
   z-index: 500;
-  right: 22px;
+  left: 50%;
   bottom: 22px;
-  width: min(360px, calc(100% - 44px));
+  width: max-content;
+  max-width: min(520px, calc(100% - 44px));
+  transform: translateX(-50%);
   pointer-events: none;
 }
 
 .toast {
   padding: 13px 15px;
+  text-align: center;
+  overflow-wrap: anywhere;
   color: var(--text);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
@@ -2309,9 +2313,8 @@ html.clip-viewer-open body {
   }
 
   .toast-region {
-    right: 12px;
     bottom: calc(82px + env(safe-area-inset-bottom, 0px));
-    width: min(360px, calc(100% - 24px));
+    max-width: calc(100% - 24px);
   }
 
   .guest-nav .text-link {

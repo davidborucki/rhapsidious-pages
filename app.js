@@ -4117,7 +4117,7 @@
     } else {
       const emptyTitle = state.activeTab === "reposts" ? "No reposts yet" : "No posts yet";
       clipsMarkup = `
-        <div class="panel empty-state">
+        <div class="empty-state">
           <div class="stack-tight">
             <h2>${escapeHtml(emptyTitle)}</h2>
           </div>

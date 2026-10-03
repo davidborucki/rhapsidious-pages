@@ -2818,12 +2818,6 @@ html.clip-viewer-open body {
   height: 30px;
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.8));
 }
-.clip-viewer-dialog > .video-report-action {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  z-index: 4;
-}
 @media (max-width: 540px) {
   .video-report-action svg { width: 27px; height: 27px; }
 }
@@ -2831,3 +2825,49 @@ html.clip-viewer-open body {
 .video-report h2 { margin: 0 0 20px; }
 .video-report .actions { justify-content: flex-end; }
 .video-report [data-report-error] { margin: 0; }
+
+/* Use the same rail as Soundbytes; the viewer owns only its placement. */
+.clip-viewer-stage {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 66px;
+  gap: 18px;
+  width: min(624px, calc(56.25dvh + 57px), calc(100vw - 180px));
+}
+.clip-viewer-stage .clip-viewer-dialog {
+  grid-column: 1;
+  width: 100%;
+}
+.video-report #videoReportTitle { outline: none; }
+.video-report-action:focus-visible {
+  outline-color: #fff;
+}
+@media (max-width: 760px) {
+  .clip-viewer-stage {
+    grid-column: 1;
+    grid-template-columns: minmax(0, 1fr);
+    width: min(calc(100vw - 24px), calc(56.25dvh - 20px));
+    gap: 0;
+  }
+  .clip-viewer-stage .feed-action-rail {
+    position: absolute;
+    z-index: 4;
+    top: 50%;
+    right: 8px;
+    width: 58px;
+    gap: 10px;
+    transform: translateY(-50%);
+  }
+  .clip-viewer-stage .social-action { width: 58px; min-height: 52px; }
+  .clip-viewer-stage .feed-creator-avatar { width: 46px; height: 46px; }
+  .clip-viewer-stage .feed-watch-action { bottom: calc(100% + 10px); }
+  .clip-viewer-stage .clip-viewer-copy { right: 80px; }
+  .clip-viewer-backdrop .clip-viewer-arrow {
+    top: auto;
+    bottom: 14px;
+  }
+  .clip-viewer-backdrop .clip-viewer-arrow-previous { left: calc(50% - 50px); }
+  .clip-viewer-backdrop .clip-viewer-arrow-next { right: calc(50% - 50px); }
+}

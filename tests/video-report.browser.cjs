@@ -67,7 +67,7 @@ const http = require("node:http");
     await page.keyboard.press("Escape");
     assert.equal(await dialog.count(), 0);
     assert.equal(requests.length, 0);
-    assert.equal(await report.evaluate(el => el === document.activeElement), true);
+    assert.equal(await report.evaluate(el => el.matches(":focus-visible")), false);
     await report.click();
     await dialog.locator("select").selectOption("COPYRIGHT");
     await dialog.locator("textarea").fill("  My work  ");

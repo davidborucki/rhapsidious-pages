@@ -1029,7 +1029,7 @@
     if (dialog) { dialog.close(); dialog.remove(); }
   }
 
-  function openVideoReport(clipId, trigger) {
+  function openVideoReport(clipId, trigger, keyboardTriggered = false) {
     if (!currentUser || document.getElementById("videoReport")) return;
     const generation = sessionGeneration;
     const dialog = document.createElement("dialog");
@@ -1037,7 +1037,7 @@
     dialog.className = "profile-editor video-report";
     dialog.setAttribute("aria-labelledby", "videoReportTitle");
     dialog.innerHTML = `
-      <h2 id="videoReportTitle">Report video</h2>
+      <h2 id="videoReportTitle" tabindex="-1" autofocus>Report video</h2>
       <form class="stack">
         <div class="field">
           <label for="reportReason">Reason</label>
@@ -1070,7 +1070,10 @@
     const active = () => dialog.isConnected && generation === sessionGeneration && currentUser;
     const dismiss = () => {
       closeVideoReport();
-      if (trigger && trigger.isConnected) trigger.focus({ preventScroll: true });
+      if (trigger && trigger.isConnected) {
+        if (keyboardTriggered) trigger.focus({ preventScroll: true });
+        else trigger.blur();
+      }
     };
     dialog.querySelector("[data-report-cancel]").addEventListener("click", dismiss);
     dialog.addEventListener("cancel", event => { event.preventDefault(); dismiss(); });
@@ -1121,14 +1124,29 @@
     return `<button class="social-action${active ? " is-active" : ""}" type="button" data-like-clip="${escapeHtml(clipId)}" aria-label="${label} clip" aria-pressed="${active}"><span class="feed-action-icon feed-action-icon-heart" aria-hidden="true"></span><span data-like-label>${label}</span></button>`;
   }
 
+  function renderClipActionRail(item, creator, creatorName) {
+    const creatorRoute = getProfileRoute(item.iosUserId);
+    const episodeUrl = getSafeMediaUrl(item.fullEpisodeFilepath) || getSafeMediaUrl(item.sourceUrl);
+    return `
+        <aside class="feed-action-rail" aria-label="Soundbite actions">
+          ${episodeUrl
+            ? `<a class="social-action feed-watch-action" data-full-episode="${escapeHtml(item.id)}" href="${escapeHtml(episodeUrl)}" target="_blank" rel="noreferrer" aria-label="Watch the full episode for ${escapeHtml(item.name || "this soundbite")}"><img class="feed-watch-icon" src="./assets/popcorn.svg" alt="" aria-hidden="true"><span>Watch</span></a>`
+            : ""}
+          <a class="feed-avatar-link" href="${escapeHtml(creatorRoute)}" aria-label="View @${escapeHtml(creatorName)} profile">
+            ${avatarMarkup(creator, creatorName, "feed-creator-avatar")}
+          </a>
+          ${renderLikeButton(item.id)}
+          ${renderSocialButton("save", item.id)}
+          ${renderSocialButton("repost", item.id)}
+          ${renderReportButton(item.id)}
+        </aside>`;
+  }
+
   function renderFeedItem(item, deferred) {
     const creator = embeddedCreator(item) || creatorCache.get(String(item.iosUserId)) || null;
     const creatorName = (creator && creator.username) || item.creatorName || "Voxxly creator";
     const streamUrl = playbackSource(item);
     const posterUrl = getAbsoluteThumbnailUrl(item.thumbnailUrl);
-    const fullEpisodeUrl = getSafeMediaUrl(item.fullEpisodeFilepath);
-    const sourceUrl = getSafeMediaUrl(item.sourceUrl);
-    const episodeUrl = fullEpisodeUrl || sourceUrl;
     const creatorRoute = getProfileRoute(item.iosUserId);
 
     return `
@@ -1163,18 +1181,7 @@
             <h2 id="clipTitle-${escapeHtml(item.id)}" class="feed-overlay-title">${escapeHtml(item.name || "Untitled soundbite")}</h2>
           </div>
         </div>
-        <aside class="feed-action-rail" aria-label="Soundbite actions">
-          ${episodeUrl
-            ? `<a class="social-action feed-watch-action" data-full-episode="${escapeHtml(item.id)}" href="${escapeHtml(episodeUrl)}" target="_blank" rel="noreferrer" aria-label="Watch the full episode for ${escapeHtml(item.name || "this soundbite")}"><img class="feed-watch-icon" src="./assets/popcorn.svg" alt="" aria-hidden="true"><span>Watch</span></a>`
-            : ""}
-          <a class="feed-avatar-link" href="${escapeHtml(creatorRoute)}" aria-label="View @${escapeHtml(creatorName)} profile">
-            ${avatarMarkup(creator, creatorName, "feed-creator-avatar")}
-          </a>
-          ${renderLikeButton(item.id)}
-          ${renderSocialButton("save", item.id)}
-          ${renderSocialButton("repost", item.id)}
-          ${renderReportButton(item.id)}
-        </aside>
+        ${renderClipActionRail(item, creator, creatorName)}
       </article>
     `;
   }
@@ -1297,20 +1304,20 @@
     return entry;
   }
 
-  function bindFeedItemActions() {
-    app.querySelectorAll("[data-report-clip]").forEach(function (button) {
+  function bindFeedItemActions(root = app) {
+    root.querySelectorAll("[data-report-clip]").forEach(function (button) {
       if (button.dataset.actionBound === "true") return;
       button.dataset.actionBound = "true";
-      button.addEventListener("click", function () { openVideoReport(button.dataset.reportClip, button); });
+      button.addEventListener("click", function (event) { openVideoReport(button.dataset.reportClip, button, event.detail === 0); });
     });
-    app.querySelectorAll("[data-like-clip]").forEach(function (button) {
+    root.querySelectorAll("[data-like-clip]").forEach(function (button) {
       if (button.dataset.actionBound === "true") {
         return;
       }
       button.dataset.actionBound = "true";
       button.addEventListener("click", handleLikeToggle);
     });
-    app.querySelectorAll("[data-save-clip]").forEach(function (button) {
+    root.querySelectorAll("[data-save-clip]").forEach(function (button) {
       if (button.dataset.actionBound === "true") {
         return;
       }
@@ -1319,7 +1326,7 @@
         handleSocialToggle(event, "save");
       });
     });
-    app.querySelectorAll("[data-repost-clip]").forEach(function (button) {
+    root.querySelectorAll("[data-repost-clip]").forEach(function (button) {
       if (button.dataset.actionBound === "true") {
         return;
       }
@@ -1328,7 +1335,7 @@
         handleSocialToggle(event, "repost");
       });
     });
-    app.querySelectorAll("[data-full-episode]").forEach(function (link) {
+    root.querySelectorAll("[data-full-episode]").forEach(function (link) {
       if (link.dataset.actionBound === "true") {
         return;
       }
@@ -1357,20 +1364,20 @@
       reportInteraction(clipId, record.watchedSec, { hasLiked: true });
     }
 
-    button.classList.toggle("is-active", !wasLiked);
-    button.setAttribute("aria-pressed", String(!wasLiked));
-    button.setAttribute("aria-label", `${wasLiked ? "Like" : "Liked"} clip`);
-    const label = button.querySelector("[data-like-label]");
-    if (label) {
-      label.textContent = wasLiked ? "Like" : "Liked";
-    }
+    document.querySelectorAll(`[data-like-clip="${clipId}"]`).forEach(function (control) {
+      control.classList.toggle("is-active", !wasLiked);
+      control.setAttribute("aria-pressed", String(!wasLiked));
+      control.setAttribute("aria-label", `${wasLiked ? "Like" : "Liked"} clip`);
+      const label = control.querySelector("[data-like-label]");
+      if (label) label.textContent = wasLiked ? "Like" : "Liked";
+    });
   }
 
   function updateSocialActionButtons(clipId) {
     const selector = clipId
       ? `[data-save-clip="${String(clipId)}"], [data-repost-clip="${String(clipId)}"]`
       : "[data-save-clip], [data-repost-clip]";
-    app.querySelectorAll(selector).forEach(function (button) {
+    document.querySelectorAll(selector).forEach(function (button) {
       const isSave = button.hasAttribute("data-save-clip");
       const id = String(button.getAttribute(isSave ? "data-save-clip" : "data-repost-clip"));
       const active = isSave ? socialState.savedIds.has(id) : socialState.repostedIds.has(id);
@@ -1396,7 +1403,7 @@
 
   function findKnownClip(clipId) {
     const id = String(clipId);
-    return feedState.items.concat(socialState.savedClips, socialState.repostedClips, profileState.clips, profileState.reposts).find(function (clip) {
+    return feedState.items.concat(socialState.savedClips, socialState.repostedClips, profileState.clips, profileState.reposts, clipViewerState ? clipViewerState.clips : []).find(function (clip) {
       return clip && String(clip.id) === id;
     }) || null;
   }
@@ -3142,6 +3149,11 @@
     const nextButton = state.overlay.querySelector("[data-clip-viewer-next]");
     const creator = embeddedCreator(clip) || creatorCache.get(String(clip.iosUserId)) || (profileState.user && String(profileState.user.id) === String(clip.iosUserId) ? profileState.user : null);
     const creatorName = (creator && creator.username) || clip.creatorName || "Voxxly creator";
+    const rail = state.overlay.querySelector(".feed-action-rail");
+    const markup = renderClipActionRail(clip, creator, creatorName);
+    if (rail) rail.outerHTML = markup;
+    else state.overlay.querySelector(".clip-viewer-stage").insertAdjacentHTML("beforeend", markup);
+    bindFeedItemActions(state.overlay);
     const clipName = clip.name || "Untitled soundbite";
     const streamUrl = playbackSource(clip);
     const posterUrl = getAbsoluteThumbnailUrl(clip.thumbnailUrl);
@@ -3279,10 +3291,10 @@
       <button class="clip-viewer-arrow clip-viewer-arrow-previous" type="button" data-clip-viewer-previous aria-label="Previous clip">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
       </button>
+      <div class="clip-viewer-stage">
       <section class="clip-viewer-dialog">
         <video class="clip-viewer-video" data-clip-viewer-video playsinline loop preload="metadata" tabindex="0" role="button"></video>
         ${renderVideoVolumeControl(selectedClip.name)}
-        ${renderReportButton(selectedClip.id)}
         <span class="clip-viewer-play-indicator" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="m6.5 5 11 7-11 7V5Z"></path></svg>
         </span>
@@ -3291,6 +3303,7 @@
           <h2 id="clipViewerTitle" data-clip-viewer-title></h2>
         </div>
       </section>
+      </div>
       <button class="clip-viewer-arrow clip-viewer-arrow-next" type="button" data-clip-viewer-next aria-label="Next clip">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
       </button>
@@ -3333,16 +3346,13 @@
     overlay.querySelector("[data-clip-viewer-close]").addEventListener("click", function () { closeClipViewer(); });
     overlay.querySelector("[data-clip-viewer-previous]").addEventListener("click", function () { moveClipViewer(-1); });
     overlay.querySelector("[data-clip-viewer-next]").addEventListener("click", function () { moveClipViewer(1); });
-    const reportButton = overlay.querySelector("[data-report-clip]");
-    reportButton.addEventListener("click", function () {
-      openVideoReport(clipViewerState.clips[clipViewerState.index].id, reportButton);
-    });
     const viewerVideo = overlay.querySelector("[data-clip-viewer-video]");
     bindFeedVolumeControl(overlay, viewerVideo);
     if (clipViewerState.pool) viewerVideo.remove();
     else bindViewerVideo(viewerVideo, overlay);
     document.addEventListener("keydown", handleClipViewerKeydown);
     updateClipViewer();
+    if (!socialState.loaded) loadSocialCollections();
     overlay.querySelector("[data-clip-viewer-close]").focus({ preventScroll: true });
   }
 

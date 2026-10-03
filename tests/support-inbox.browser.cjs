@@ -2,7 +2,8 @@ const {chromium,webkit}=require('playwright');const assert=require('node:assert/
 (async()=>{const root=process.env.WEB_ROOT||path.resolve(__dirname,'..');const server=http.createServer((req,res)=>{const pathname=new URL(req.url,'http://localhost').pathname;const file=path.resolve(root,'.'+(pathname==='/'?'/index.html':pathname));if(!file.startsWith(root+'/')){res.writeHead(403).end();return}fs.readFile(file,(e,data)=>{if(e){res.writeHead(404).end();return}res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml'})[path.extname(file)]||'application/octet-stream');res.end(data)});});await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;
 try{browser=await (process.env.BROWSER_ENGINE==='webkit'?webkit:chromium).launch();const page=await browser.newPage({viewport:{width:390,height:844}});await page.addInitScript(()=>localStorage.setItem('voxxly_web_access_token','fixture'));let admin=true,failReply=true,messages=[],lastRequestId,replyCount=0;const errors=[];page.on('pageerror',e=>errors.push(e.message));const ticket={id:1,status:'OPEN',category:'OTHER',message:'<img src=x onerror=alert(1)> My upload is stuck.',createdAt:new Date().toISOString()};
 await page.route('https://dev-backend-withered-thunder-4589.fly.dev/**',async route=>{const url=new URL(route.request().url());const method=route.request().method();let body=[],status=200;
-if(url.pathname==='/auth/me')body={id:1,username:'dave',email:'admin@example.test',admin};
+if(url.pathname==='/auth/me')body={id:1,username:'dave',email:'admin@example.test'};
+else if(url.pathname==='/me/support-access')body={admin};
 else if(url.pathname==='/admin/support/tickets')body=[ticket];
 else if(url.pathname==='/admin/reports/clips')body=[{id:2,status:'PENDING',clipId:99,reason:'OTHER',details:'Reported video',createdAt:ticket.createdAt}];
 else if(url.pathname==='/admin/reports/users')body=[];

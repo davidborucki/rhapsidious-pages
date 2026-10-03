@@ -58,6 +58,12 @@
   const deviceIdStorageKey = authConfig.deviceIdStorageKey || "voxxly_device_id";
   const recentSearchStorageKeyPrefix = "voxxly_recent_profile_searches";
 
+  async function loadSessionUser() {
+    const user = await requestJson(authConfig.mePath || "/auth/me");
+    try { user.admin = (await requestJson("/me/support-access")).admin === true; }
+    catch (_) { user.admin = false; }
+    return user;
+  }
   let currentUser = null;
   let activeRoute = null;
   let authNotice = null;
@@ -926,7 +932,7 @@
       throw new ApiError("Login succeeded, but no access token was returned.", 500, payload);
     }
 
-    currentUser = await requestJson(authConfig.mePath || "/auth/me");
+    currentUser = await loadSessionUser();
     resetUserData();
     uploadState.host = currentUser.username || "";
   }
@@ -4816,7 +4822,7 @@
     syncShell("");
     if (getAccessToken() || getRefreshToken()) {
       try {
-        currentUser = await requestJson(authConfig.mePath || "/auth/me");
+        currentUser = await loadSessionUser();
         uploadState.host = currentUser.username || "";
       } catch (error) {
         clearSession();

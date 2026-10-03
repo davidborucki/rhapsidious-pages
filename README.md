@@ -5,7 +5,8 @@ A dependency-free web client for Voxxly. It uses the existing Spring Boot API fo
 ## Features
 
 - Voxxly branding with the supplied logo and Helvetica-first typography
-- Account creation followed by automatic JWT sign-in
+- Minimal sign-in and two-step account creation followed by automatic JWT sign-in
+- Emailed, expiring password-reset links with a dedicated new-password screen
 - Access-token refresh and server logout
 - Personalized, continuously loaded Soundbites recommendations
 - Automatic play/pause behavior with recommendation watch, like, save, and repost signals
@@ -24,6 +25,9 @@ Update `config.js` when the API origin or contract changes. The current client u
 - `POST /auth/login` — obtain access and refresh tokens
 - `POST /auth/refresh` — rotate an expired session
 - `POST /auth/logout` — revoke a refresh token
+- `POST /auth/password/forgot` — email a password-reset link
+- `POST /auth/password/validate` — check a reset link without consuming it
+- `POST /auth/password/reset` — set a new password and revoke existing sessions
 - `GET /auth/me` — load the signed-in account
 - `POST /iosclips` — upload one clip at a time
 - `GET /processing/status?clipId=...` — follow post-upload processing

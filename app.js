@@ -40,6 +40,8 @@
   const routes = {
     login: "#/login",
     signup: "#/signup",
+    forgotPassword: "#/forgot-password",
+    resetPassword: "#/reset-password",
     feed: "#/feed",
     saved: "#/saved",
     search: "#/search",
@@ -634,14 +636,16 @@
   }
 
   function syncShell(route) {
-    const isSignedIn = Boolean(currentUser);
+    const isAuthRoute = [routes.login, routes.signup, routes.forgotPassword, routes.resetPassword].includes(route) || !route;
+    const isSignedIn = Boolean(currentUser) && !isAuthRoute;
+    document.documentElement.classList.toggle("auth-route", isAuthRoute);
     document.documentElement.classList.toggle("feed-route", route === routes.feed);
     document.documentElement.classList.toggle("settings-route", route === routes.settings);
     document.documentElement.classList.toggle("signed-in", isSignedIn);
     brandLink.href = isSignedIn ? routes.feed : routes.login;
     brandLink.setAttribute("aria-label", isSignedIn ? "Voxxly Soundbytes" : "Voxxly login");
     primaryNav.classList.toggle("hidden", !isSignedIn || route === routes.settings);
-    guestNav.classList.toggle("hidden", isSignedIn);
+    guestNav.classList.add("hidden");
     accountLink.classList.toggle("hidden", !isSignedIn);
     logoutButton.classList.toggle("hidden", !isSignedIn);
 
@@ -729,119 +733,178 @@
     resetUserData();
   }
 
-  function authStoryMarkup() {
-    return `
-      <div class="auth-story" aria-hidden="true">
-        <img class="auth-logo" src="./assets/voxxly-logo-384.png" alt="" />
-        <h1>Find the moment worth <span class="gradient-word">hearing.</span></h1>
-        <p>Standout podcast clips, shaped into a personal feed that learns what keeps you listening.</p>
-      </div>
-    `;
+  function authFooterMarkup() {
+    return `<nav class="auth-legal" aria-label="Legal"><a href="./terms-of-service/" target="_blank" rel="noopener">Terms</a><a href="./privacy-policy/" target="_blank" rel="noopener">Privacy</a><a href="./support/" target="_blank" rel="noopener">Support</a></nav>`;
+  }
+
+  function passwordField(id, label, autocomplete) {
+    return `<div class="field"><label for="${id}">${label}</label><div class="password-input"><input id="${id}" name="${id}" type="password" autocomplete="${autocomplete}" ${autocomplete === "new-password" ? 'minlength="8" maxlength="72"' : ""} required /><button type="button" class="password-toggle" aria-label="Show ${label.toLowerCase()}" aria-pressed="false" data-password="${id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>`;
+  }
+
+  function bindPasswordToggles() {
+    app.querySelectorAll("[data-password]").forEach(button => button.addEventListener("click", () => {
+      const input = document.getElementById(button.dataset.password);
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      button.setAttribute("aria-pressed", String(show));
+      const label = app.querySelector(`label[for="${input.id}"]`).textContent.toLowerCase();
+      button.setAttribute("aria-label", `${show ? "Hide" : "Show"} ${label}`);
+    }));
   }
 
   function renderLogin() {
     const notice = authNotice;
     authNotice = null;
-    app.innerHTML = `
-      <section class="auth-page" aria-labelledby="loginTitle">
-        ${authStoryMarkup()}
-        <div class="panel auth-card">
-          <div class="stack">
-            <div>
-              <p class="eyebrow">Welcome back</p>
-              <h1 id="loginTitle" class="auth-title">Log in to Voxxly</h1>
-              <p class="auth-subtitle">Continue to your personalized Soundbites.</p>
-            </div>
-            ${renderStatus(notice, "loginStatus")}
-            <form id="loginForm" class="stack" novalidate>
-              <div class="field">
-                <label for="login">Username or email</label>
-                <input id="login" name="login" type="text" autocomplete="username" required />
-              </div>
-              <div class="field">
-                <label for="password">Password</label>
-                <input id="password" name="password" type="password" autocomplete="current-password" required />
-              </div>
-              <button id="loginSubmit" class="primary-button auth-submit" type="submit">Log in</button>
-            </form>
-            <div class="auth-switch">
-              <span>Don’t have an account?</span>
-              <a href="#/signup">Create one</a>
-            </div>
-            <nav class="auth-switch" aria-label="Legal"><a href="./terms-of-service/" target="_blank" rel="noopener">Terms of Service</a> · <a href="./privacy-policy/" target="_blank" rel="noopener">Privacy Policy</a></nav>
-          </div>
-        </div>
-      </section>
-    `;
-
+    app.innerHTML = `<section class="auth-page" aria-labelledby="loginTitle">
+      <div class="auth-content">
+        <header class="auth-heading"><span class="auth-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><h1 id="loginTitle">Your next<br>good listen.</h1></header>
+        <form id="loginForm" class="auth-form" novalidate>
+          <div class="field"><label for="login">Username or email</label><input id="login" name="login" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required /></div>
+          ${passwordField("password", "Password", "current-password")}
+          <a class="auth-forgot" href="#/forgot-password">Forgot password?</a>
+          ${renderStatus(notice, "loginStatus")}
+          <button id="loginSubmit" class="primary-button auth-submit" type="submit">Log in</button>
+        </form>
+        <p class="auth-switch">New here? <a href="#/signup">Create an account</a></p>
+        ${authFooterMarkup()}
+      </div>
+    </section>`;
+    bindPasswordToggles();
     document.getElementById("loginForm").addEventListener("submit", handleLoginSubmit);
   }
 
   function getYesterdayDate() {
-    const date = new Date();
-    date.setDate(date.getDate() - 1);
+    const date = new Date(); date.setDate(date.getDate() - 1);
     return date.toISOString().slice(0, 10);
   }
 
   function renderSignup() {
-    app.innerHTML = `
-      <section class="auth-page" aria-labelledby="signupTitle">
-        ${authStoryMarkup()}
-        <div class="panel auth-card">
-          <div class="stack">
-            <div>
-              <p class="eyebrow">Join the conversation</p>
-              <h1 id="signupTitle" class="auth-title">Create your account</h1>
-              <p class="auth-subtitle">Your personalized Soundbites feed starts here.</p>
-            </div>
-            ${renderStatus(null, "signupStatus")}
-            <form id="signupForm" class="stack" novalidate>
-              <div class="field">
-                <label for="signupUsername">Username</label>
-                <input id="signupUsername" name="username" type="text" autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-z0-9._-]{3,32}" placeholder="your.handle" required />
-                <span class="helper">3–32 letters, numbers, periods, underscores, or dashes.</span>
-              </div>
-              <div class="field">
-                <label for="signupEmail">Email</label>
-                <input id="signupEmail" name="email" type="email" autocomplete="email" required />
-              </div>
-              <div class="field-row">
-                <div class="field">
-                  <label for="signupPassword">Password</label>
-                  <input id="signupPassword" name="password" type="password" autocomplete="new-password" minlength="8" required />
-                </div>
-                <div class="field">
-                  <label for="signupConfirmPassword">Confirm password</label>
-                  <input id="signupConfirmPassword" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required />
-                </div>
-              </div>
-              <div class="field-row">
-                <div class="field">
-                  <label for="signupDob">Date of birth</label>
-                  <input id="signupDob" name="dob" type="date" autocomplete="bday" max="${getYesterdayDate()}" required />
-                </div>
-                <div class="field">
-                  <label for="signupGender">Gender</label>
-                  <select id="signupGender" name="gender" required>
-                    <option value="">Select</option>
-                    <option value="MALE">Male</option>
-                    <option value="FEMALE">Female</option>
-                  </select>
-                </div>
-              </div>
-              <label class="checkbox-field">
-                <input name="agreement" type="checkbox" required />
-                <span>I agree to the <a href="./terms-of-service/" target="_blank" rel="noopener">Terms of Service</a> and acknowledge the <a href="./privacy-policy/" target="_blank" rel="noopener">Privacy Policy</a>. I am at least 13 and, if I am a minor, have permission from a parent or legal guardian. <span class="sr-only">Policy links open in a new tab.</span></span>
-              </label>
-              <button id="signupSubmit" class="primary-button" type="submit">Create account</button>
-            </form>
-            <p class="auth-switch">Already have an account? <a href="#/login">Log in</a></p>
-          </div>
+    app.innerHTML = `<section class="auth-page" aria-labelledby="signupTitle"><div class="auth-content">
+      <header class="auth-heading"><div class="auth-step-row"><button id="signupBack" class="auth-back" type="button" aria-label="Back to account details" hidden>← Back</button><span id="signupStepLabel" class="auth-step">1 of 2</span></div><h1 id="signupTitle">Make it yours.</h1></header>
+      <form id="signupForm" class="auth-form" novalidate>
+        <div id="signupAccount" class="auth-fields">
+          <div class="field"><label for="signupUsername">Username</label><input id="signupUsername" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="32" pattern="[A-Za-z0-9._-]{3,32}" required /></div>
+          <div class="field"><label for="signupEmail">Email</label><input id="signupEmail" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" required /></div>
+          ${passwordField("signupPassword", "Password", "new-password")}
+          <span class="auth-hint">At least 8 characters.</span>
         </div>
-      </section>
-    `;
+        <div id="signupAbout" class="auth-fields" hidden>
+          <div class="field"><label for="signupDob">Date of birth</label><input id="signupDob" name="dob" type="date" autocomplete="bday" max="${getYesterdayDate()}" required /></div>
+          <div class="field"><label for="signupGender">Gender</label><select id="signupGender" name="gender" required><option value="">Select</option><option value="MALE">Male</option><option value="FEMALE">Female</option></select></div>
+          <label class="checkbox-field auth-agreement"><input name="agreement" type="checkbox" required /><span>I agree to the <a href="./terms-of-service/" target="_blank" rel="noopener">Terms</a> and acknowledge the <a href="./privacy-policy/" target="_blank" rel="noopener">Privacy Policy</a>. I’m 13 or older, with a parent’s permission if I’m a minor.</span></label>
+        </div>
+        ${renderStatus(null, "signupStatus")}
+        <button id="signupSubmit" class="primary-button auth-submit" type="submit">Continue</button>
+      </form>
+      <p class="auth-switch">Already here? <a href="#/login">Log in</a></p>
+      ${authFooterMarkup()}
+    </div></section>`;
+    const form = document.getElementById("signupForm");
+    form.dataset.step = "1";
+    const setStep = step => {
+      form.dataset.step = String(step);
+      document.getElementById("signupAccount").hidden = step !== 1;
+      document.getElementById("signupAbout").hidden = step !== 2;
+      document.getElementById("signupBack").hidden = step !== 2;
+      document.getElementById("signupStepLabel").textContent = `${step} of 2`;
+      document.getElementById("signupTitle").textContent = step === 1 ? "Make it yours." : "A little about you.";
+      document.getElementById("signupSubmit").textContent = step === 1 ? "Continue" : "Create account";
+      setStatusMessage("signupStatus", null);
+      focusPageHeading();
+    };
+    form.setStep = setStep;
+    document.getElementById("signupBack").addEventListener("click", () => { if (!form.dataset.busy) setStep(1); });
+    bindPasswordToggles();
+    form.addEventListener("submit", handleSignupSubmit);
+  }
 
-    document.getElementById("signupForm").addEventListener("submit", handleSignupSubmit);
+  function renderForgotPassword() {
+    app.innerHTML = `<section class="auth-page" aria-labelledby="forgotTitle"><div class="auth-content">
+      <a class="auth-back" href="#/login">← Log in</a>
+      <header class="auth-heading"><h1 id="forgotTitle">Forgot password?</h1><p>We’ll email you a reset link.</p></header>
+      <form id="forgotForm" class="auth-form" novalidate>
+        <div class="field"><label for="resetEmail">Email</label><input id="resetEmail" type="email" name="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" required /></div>
+        ${renderStatus(null, "forgotStatus")}
+        <button class="primary-button auth-submit" type="submit">Send reset link</button>
+      </form>
+      ${authFooterMarkup()}
+    </div></section>`;
+    const form = document.getElementById("forgotForm");
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const button = form.querySelector("button[type=submit]");
+      if (button.disabled) return;
+      if (!form.email.validity.valid) { setStatusMessage("forgotStatus", { type: "error", message: "Enter a valid email address." }); form.email.focus(); return; }
+      const email = form.email.value.trim();
+      button.disabled = true; button.textContent = "Sending…";
+      setStatusMessage("forgotStatus", null);
+      try {
+        await requestJson("/auth/password/forgot", { method: "POST", auth: false, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+        if (!form.isConnected) return;
+        app.innerHTML = `<section class="auth-page" aria-labelledby="forgotTitle"><div class="auth-content"><div class="auth-result-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/></svg></div><header class="auth-heading"><h1 id="forgotTitle">Check your inbox.</h1><p>If there’s an account for that email, a reset link is on its way.</p></header><a class="primary-button auth-submit" href="#/login">Back to log in</a><p class="auth-switch"><a href="#/forgot-password" id="tryResetAgain">Try another email</a></p>${authFooterMarkup()}</div></section>`;
+        document.getElementById("tryResetAgain").addEventListener("click", event => { event.preventDefault(); renderForgotPassword(); focusPageHeading(); });
+        focusPageHeading();
+      } catch (error) {
+        if (!form.isConnected) return;
+        setStatusMessage("forgotStatus", { type: "error", message: error.status === 429 ? "Please wait a minute before trying again." : "Couldn’t send the link. Try again shortly." });
+        button.disabled = false; button.textContent = "Send reset link";
+      }
+    });
+  }
+
+  let passwordResetSecret = "";
+  async function renderResetPassword() {
+    const incomingToken = getHashQueryParam("token");
+    if (incomingToken) {
+      passwordResetSecret = incomingToken;
+      // The fragment never goes to the server; retain it until completion so reloads work.
+    }
+    const secret = passwordResetSecret;
+    app.innerHTML = `<section class="auth-page" aria-labelledby="resetTitle"><div class="auth-content"><header class="auth-heading"><h1 id="resetTitle">A fresh start.</h1><p id="resetLoading" role="status">Checking your link…</p></header></div></section>`;
+    const content = app.querySelector(".auth-content");
+    const invalid = () => {
+      if (!content.isConnected) return;
+      content.innerHTML = `<header class="auth-heading"><h1 id="resetTitle">Let’s try a new link.</h1><p>This link has expired or was already used.</p></header><a class="primary-button auth-submit" href="#/forgot-password">Get a reset link</a><p class="auth-switch"><a href="#/login">Back to log in</a></p>${authFooterMarkup()}`;
+      passwordResetSecret = "";
+      window.history.replaceState(null, "", window.location.pathname + window.location.search + routes.resetPassword);
+      focusPageHeading();
+    };
+    if (!/^[A-Za-z0-9_-]{43}$/.test(secret)) { invalid(); return; }
+    try {
+      await requestJson("/auth/password/validate", { method: "POST", auth: false, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: secret }) });
+    } catch (error) {
+      if (!content.isConnected) return;
+      if (error.status === 400) { invalid(); return; }
+      content.innerHTML = `<header class="auth-heading"><h1 id="resetTitle">Try again shortly.</h1><p>We couldn’t check your link.</p></header><button class="primary-button auth-submit" id="retryReset" type="button">Try again</button>${authFooterMarkup()}`;
+      document.getElementById("retryReset").addEventListener("click", renderResetPassword); focusPageHeading(); return;
+    }
+    if (!content.isConnected) return;
+    content.innerHTML = `<header class="auth-heading"><h1 id="resetTitle">A fresh start.</h1><p>Choose your new password.</p></header><form id="resetForm" class="auth-form" novalidate>${passwordField("newPassword", "New password", "new-password")}${passwordField("confirmPassword", "Confirm password", "new-password")}<span class="auth-hint">At least 8 characters.</span>${renderStatus(null, "resetStatus")}<button class="primary-button auth-submit" type="submit">Save password</button></form>${authFooterMarkup()}`;
+    bindPasswordToggles(); focusPageHeading();
+    const form = document.getElementById("resetForm");
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const button = form.querySelector("button[type=submit]");
+      if (button.disabled) return;
+      const password = form.newPassword.value;
+      if (password.length < 8 || new TextEncoder().encode(password).length > 72) { setStatusMessage("resetStatus", { type: "error", message: password.length < 8 ? "Use at least 8 characters." : "Try a shorter password." }); form.newPassword.focus(); return; }
+      if (password !== form.confirmPassword.value) { setStatusMessage("resetStatus", { type: "error", message: "Passwords don’t match." }); form.confirmPassword.focus(); return; }
+      button.disabled = true; button.textContent = "Saving…"; setStatusMessage("resetStatus", null);
+      try {
+        await requestJson("/auth/password/reset", { method: "POST", auth: false, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: secret, password }) });
+        passwordResetSecret = ""; clearSession();
+        if (!form.isConnected) return;
+        window.history.replaceState(null, "", window.location.pathname + window.location.search + routes.resetPassword);
+        syncShell(routes.resetPassword);
+        content.innerHTML = `<div class="auth-result-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m5 12 4 4L19 6"/></svg></div><header class="auth-heading"><h1 id="resetTitle">You’re all set.</h1><p>Log in with your new password.</p></header><a class="primary-button auth-submit" href="#/login">Log in</a>${authFooterMarkup()}`;
+        focusPageHeading();
+      } catch (error) {
+        if (!form.isConnected) return;
+        if (error.status === 400) { invalid(); return; }
+        setStatusMessage("resetStatus", { type: "error", message: error.status === 429 ? "Please wait a minute before trying again." : "Couldn’t save your password. Try again." });
+        button.disabled = false; button.textContent = "Save password";
+      }
+    });
   }
 
   async function loginWithCredentials(login, password) {
@@ -869,6 +932,7 @@
     event.preventDefault();
     const form = event.currentTarget;
     const submitButton = document.getElementById("loginSubmit");
+    if (submitButton.disabled) return;
     const login = form.login.value.trim();
     const password = form.password.value;
 
@@ -879,7 +943,7 @@
 
     submitButton.disabled = true;
     submitButton.textContent = "Logging in…";
-    setStatusMessage("loginStatus", { type: "info", message: "Signing you in…" });
+    setStatusMessage("loginStatus", null);
 
     try {
       await loginWithCredentials(login, password);
@@ -888,7 +952,7 @@
       clearSession();
       setStatusMessage("loginStatus", {
         type: "error",
-        message: error.status === 401 ? "That username/email and password combination was not recognized." : error.message || "Unable to log in."
+        message: error.status === 401 ? "Incorrect username or password." : error.message || "Unable to log in."
       });
       submitButton.disabled = false;
       submitButton.textContent = "Log in";
@@ -899,31 +963,28 @@
     event.preventDefault();
     const form = event.currentTarget;
     const submitButton = document.getElementById("signupSubmit");
+    if (submitButton.disabled) return;
     const username = form.username.value.trim();
     const email = form.email.value.trim();
-    const password = form.password.value;
-    const confirmPassword = form.confirmPassword.value;
+    const password = form.signupPassword.value;
     const dob = form.dob.value;
     const gender = form.gender.value;
 
     if (!/^[A-Za-z0-9._-]{3,32}$/.test(username)) {
-      setStatusMessage("signupStatus", { type: "error", message: "Choose a valid username with 3–32 allowed characters." });
+      setStatusMessage("signupStatus", { type: "error", message: "Use 3–32 letters, numbers, dots, underscores or dashes." });
       return;
     }
     if (!form.email.validity.valid) {
       setStatusMessage("signupStatus", { type: "error", message: "Enter a valid email address." });
       return;
     }
-    if (password.length < 8) {
-      setStatusMessage("signupStatus", { type: "error", message: "Use at least 8 characters for your password." });
+    if (password.length < 8 || new TextEncoder().encode(password).length > 72) {
+      setStatusMessage("signupStatus", { type: "error", message: password.length < 8 ? "Use at least 8 characters." : "Try a shorter password." });
       return;
     }
-    if (password !== confirmPassword) {
-      setStatusMessage("signupStatus", { type: "error", message: "Your passwords do not match." });
-      return;
-    }
+    if (form.dataset.step === "1") { form.setStep(2); return; }
     if (!gender) {
-      setStatusMessage("signupStatus", { type: "error", message: "Select a gender to complete the required account fields." });
+      setStatusMessage("signupStatus", { type: "error", message: "Select a gender." });
       return;
     }
     if (!dob || dob > getYesterdayDate()) {
@@ -944,8 +1005,10 @@
     }
 
     submitButton.disabled = true;
-    submitButton.textContent = "Creating account…";
-    setStatusMessage("signupStatus", { type: "info", message: "Creating your Voxxly account…" });
+    submitButton.textContent = "Creating…";
+    form.dataset.busy = "true";
+    document.getElementById("signupBack").disabled = true;
+    setStatusMessage("signupStatus", null);
 
     const registration = { email, username, password, gender, dob, termsVersion: "2026-10-02", privacyVersion: "2026-10-02" };
 
@@ -958,11 +1021,14 @@
       });
     } catch (error) {
       const message = error.status === 409
-        ? "That username or email is already in use. Try another, or log in instead."
+        ? "That username or email is already in use."
         : error.message || "Unable to create your account.";
+      if (!form.isConnected) return;
+      delete form.dataset.busy;
+      document.getElementById("signupBack").disabled = false;
+      form.setStep(1);
       setStatusMessage("signupStatus", { type: "error", message: message });
       submitButton.disabled = false;
-      submitButton.textContent = "Create account";
       return;
     }
 
@@ -4625,12 +4691,19 @@
       }
     }
 
+    if (route !== routes.resetPassword) passwordResetSecret = "";
     activeRoute = route;
     syncShell(route);
 
     switch (route) {
       case routes.signup:
         renderSignup();
+        break;
+      case routes.forgotPassword:
+        renderForgotPassword();
+        break;
+      case routes.resetPassword:
+        renderResetPassword();
         break;
       case routes.feed:
         renderFeed();

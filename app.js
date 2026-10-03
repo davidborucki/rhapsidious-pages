@@ -154,6 +154,8 @@
       following: false,
       followStateKnown: false,
       followPending: false,
+      blocked: false,
+      blockPending: false,
       activeTab: "posts",
       loading: false,
       loaded: false,
@@ -3802,6 +3804,17 @@
     const isOwnProfile = currentUser && String(currentUser.id) === String(targetUserId);
     const knownUser = state.user || (isOwnProfile ? currentUser : null);
 
+    if (state.blocked) {
+      app.innerHTML = `<section class="page-wrap profile-page" aria-labelledby="profileTitle">
+        <div class="panel profile-hero">${avatarMarkup(knownUser, knownUser && knownUser.username, "profile-avatar")}
+          <div class="profile-identity"><h1 id="profileTitle" class="profile-name">${escapeHtml(knownUser && knownUser.username || "User")}</h1>
+            <p class="muted">User blocked</p><button id="blockProfile" class="secondary-button" type="button" ${state.blockPending ? "disabled" : ""}>${state.blockPending ? "…" : "Unblock"}</button>
+          </div>
+        </div></section>`;
+      document.getElementById("blockProfile").addEventListener("click", handleBlockToggle);
+      return;
+    }
+
     if (!knownUser) {
       const unavailable = Boolean(state.error);
       app.innerHTML = `
@@ -3873,11 +3886,11 @@
         <div class="panel profile-hero">
           ${avatarMarkup(user, user.username, "profile-avatar")}
           <div class="profile-identity">
-            <div class="profile-name-row"><h1 id="profileTitle" class="profile-name">${escapeHtml(user.username || "Voxxly creator")}</h1>${isOwnProfile ? '<button id="editProfile" class="secondary-button" type="button">Edit profile</button><a class="secondary-button profile-settings-button" href="#/settings" aria-label="Settings" title="Settings"><span aria-hidden="true"></span></a>' : ""}</div>
+            <div class="profile-name-row"><h1 id="profileTitle" class="profile-name">${escapeHtml(user.username || "Voxxly creator")}</h1>${isOwnProfile ? '<button id="editProfile" class="secondary-button" type="button">Edit profile</button><a class="secondary-button profile-settings-button" href="#/settings" aria-label="Settings" title="Settings"><span aria-hidden="true"></span></a>' : (state.loaded ? `<button id="blockProfile" class="secondary-button" type="button" ${state.blockPending || state.followPending ? "disabled" : ""}>${state.blockPending ? "…" : "Block"}</button>` : "")}</div>
             <p class="profile-handle">@${escapeHtml(user.username || "creator")}</p>
             ${!isOwnProfile && state.loaded
               ? (state.followStateKnown
-                ? `<button id="followProfile" class="${state.following ? "secondary-button" : "primary-button"} follow-button" type="button" aria-pressed="${state.following}" ${state.followPending ? "disabled" : ""}>${state.followPending ? "Updating…" : (state.following ? "Following" : "Follow")}</button>`
+                ? `<button id="followProfile" class="${state.following ? "secondary-button" : "primary-button"} follow-button" type="button" aria-pressed="${state.following}" ${state.followPending || state.blockPending ? "disabled" : ""}>${state.followPending ? "Updating…" : (state.following ? "Following" : "Follow")}</button>`
                 : `<button class="secondary-button follow-button" type="button" disabled>Follow unavailable</button>`)
               : ""}
           </div>
@@ -3910,6 +3923,8 @@
 
     const editButton = document.getElementById("editProfile");
     if (editButton) editButton.addEventListener("click", openProfileEditor);
+    const blockButton = document.getElementById("blockProfile");
+    if (blockButton) blockButton.addEventListener("click", handleBlockToggle);
     const followButton = document.getElementById("followProfile");
     if (followButton) {
       followButton.addEventListener("click", handleFollowToggle);
@@ -3948,6 +3963,20 @@
     const followStatePath = fillPathTemplate(socialConfig.followStatePathTemplate || "/ios/users/{viewerId}/follows/{creatorId}", { viewerId: viewerId, creatorId: targetUserId });
 
     try {
+      if (String(targetUserId) !== String(viewerId)) {
+        const blockedUsers = await requestJson("/me/blocked-users");
+        if (!isCurrentRequest()) return;
+        if (!Array.isArray(blockedUsers)) throw new Error("Couldn’t load this profile.");
+        const blockedUser = blockedUsers.find(user => String(user.id) === String(targetUserId));
+        if (blockedUser) {
+          state.user = blockedUser;
+          state.blocked = true;
+          state.clips = [];
+          state.reposts = [];
+          state.loaded = true;
+          return;
+        }
+      }
       const results = await Promise.all([
         String(targetUserId) === String(viewerId) ? Promise.resolve(currentUser) : requestJson(userPath),
         requestJson(clipsPath),
@@ -3986,8 +4015,58 @@
     }
   }
 
+  function invalidateBlockedContent() {
+    feedRequests.forEach(controller => controller.abort());
+    feedRequests.clear();
+    if (feedState.queue) feedState.queue.destroy();
+    if (feedPool) { feedPool.destroy(); feedPool = null; }
+    feedState = createFeedState();
+    feedWatchRecords = new Map();
+    creatorCache.clear();
+    socialState = createSocialState();
+    searchState = createSearchState();
+    connectionsState = createConnectionsState();
+  }
+
+  async function handleBlockToggle() {
+    const state = profileState;
+    if (!currentUser || !state.user || state.blockPending || state.followPending || state.userId === String(currentUser.id)) return;
+    const generation = sessionGeneration;
+    const wasBlocked = state.blocked;
+    state.blockPending = true;
+    window.clearTimeout(toastTimer);
+    toastRegion.innerHTML = "";
+    renderProfile();
+    try {
+      await requestJson("/users/" + encodeURIComponent(state.userId) + "/block", { method: wasBlocked ? "DELETE" : "POST" });
+      if (generation !== sessionGeneration) return;
+      invalidateBlockedContent();
+      if (profileState === state) {
+        state.blocked = !wasBlocked;
+        state.following = false;
+        state.counts = null;
+        state.clips = [];
+        state.reposts = [];
+        state.loaded = !wasBlocked;
+        state.error = "";
+      }
+    } catch (_) {
+      if (generation === sessionGeneration) showToast(wasBlocked ? "Couldn’t unblock user." : "Couldn’t block user.");
+    } finally {
+      state.blockPending = false;
+      if (profileState === state && generation === sessionGeneration && getRoute() === routes.profile) {
+        renderProfile();
+        const button = document.getElementById("blockProfile");
+        if (button) button.focus({ preventScroll: true });
+      } else if (generation === sessionGeneration) {
+        // Navigation can finish before the mutation does; refresh the visible cache too.
+        render();
+      }
+    }
+  }
+
   async function handleFollowToggle() {
-    if (!currentUser || !profileState.followStateKnown || profileState.followPending || !profileState.userId || String(profileState.userId) === String(currentUser.id)) {
+    if (!currentUser || profileState.blocked || profileState.blockPending || !profileState.followStateKnown || profileState.followPending || !profileState.userId || String(profileState.userId) === String(currentUser.id)) {
       return;
     }
 
@@ -4152,14 +4231,17 @@
   }
 
   function renderSettings() {
+    const generation = sessionGeneration;
     settingsCleanup = window.VoxxlySettings.mount(app, {
       user: currentUser,
       request: requestJson,
       escape: escapeHtml,
       avatar: avatarMarkup,
       onUnblock: function () {
-        creatorCache.clear();
-        searchState = createSearchState();
+        if (generation !== sessionGeneration) return;
+        invalidateBlockedContent();
+        profileState = createProfileState(profileState.userId);
+        if (getRoute() !== routes.settings) render();
       }
     });
   }

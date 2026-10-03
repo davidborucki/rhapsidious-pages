@@ -66,10 +66,10 @@
         body = `<p class="settings-intro">Manage mature and age-restricted content.</p>
           <div class="settings-item"><h2>Content preferences</h2><p>A personal setting for mature content isn’t available yet.</p><div class="settings-unavailable"><span>Hide mature content</span><span class="settings-badge">Not available yet</span></div><p class="settings-footnote">Existing server-side age restrictions still apply. This page does not override them.</p></div>`;
       } else if (selected === "blocked") {
-        body = `<p class="settings-intro">Review the accounts you’ve blocked. You can unblock them here.</p>`;
+        body = "";
         if (blockedError) body += `<p class="settings-error" role="alert">${escape(blockedError)}</p><button class="secondary-button" data-retry="blocked">Try again</button>`;
-        if (blocked === null && !blockedError) body += `<p class="muted" role="status">Loading blocked users…</p>`;
-        if (blocked && !blocked.length) body += `<div class="settings-item"><h2>No blocked users</h2><p>Accounts you block will appear here.</p></div>`;
+        if (blocked === null && !blockedError) body += `<p class="muted" role="status">Loading…</p>`;
+        if (blocked && !blocked.length) body += `<div class="settings-item"><h2>No blocked users</h2></div>`;
         if (blocked && blocked.length) body += `<ul class="settings-users">${blocked.map(person => `<li>${options.avatar(person, person.username)}<div class="settings-user-name"><strong>${escape(person.username || "User")}</strong><span>@${escape(person.username || "user")}</span></div><button class="secondary-button" type="button" data-unblock="${escape(String(person.id))}" aria-label="Unblock ${escape(person.username || "user")}" ${unblocking.has(String(person.id)) ? "disabled" : ""}>${unblocking.has(String(person.id)) ? "Unblocking…" : "Unblock"}</button></li>`).join("")}</ul>`;
       } else if (selected === "support") {
         body = submitted ? `<div class="settings-item" role="status"><h2>Message sent</h2><p>Thanks for contacting us. Your support request has been received.</p><button class="secondary-button" data-new-ticket>Send another message</button></div>` : `
@@ -125,10 +125,8 @@
         render();
         try {
           await request("/users/" + encodeURIComponent(id) + "/block", { method: "DELETE" });
-          if (active) {
-            blocked = blocked.filter(person => String(person.id) !== id);
-            options.onUnblock();
-          }
+          if (active) blocked = blocked.filter(person => String(person.id) !== id);
+          options.onUnblock(id);
         } catch (_) { if (active) blockedError = "Couldn’t unblock this user. Please try again."; }
         finally {
           unblocking.delete(id);

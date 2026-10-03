@@ -846,7 +846,7 @@
         focusPageHeading();
       } catch (error) {
         if (!form.isConnected) return;
-        setStatusMessage("forgotStatus", { type: "error", message: error.status === 429 ? "Please wait a minute before trying again." : "Couldn’t send the link. Try again shortly." });
+        setStatusMessage("forgotStatus", { type: "error", message: error.status === 429 ? "Too many attempts. Try again later." : "Couldn’t send the link. Try again shortly." });
         button.disabled = false; button.textContent = "Send reset link";
       }
     });
@@ -901,7 +901,7 @@
       } catch (error) {
         if (!form.isConnected) return;
         if (error.status === 400) { invalid(); return; }
-        setStatusMessage("resetStatus", { type: "error", message: error.status === 429 ? "Please wait a minute before trying again." : "Couldn’t save your password. Try again." });
+        setStatusMessage("resetStatus", { type: "error", message: error.status === 429 ? "Too many attempts. Try again later." : "Couldn’t save your password. Try again." });
         button.disabled = false; button.textContent = "Save password";
       }
     });
@@ -4784,7 +4784,11 @@
     }
   });
   logoutButton.addEventListener("click", handleLogout);
-  window.addEventListener("hashchange", render);
+  window.addEventListener("hashchange", function (event) {
+    // A redirect can queue another event after the visitor has already moved on.
+    // Ignore that stale navigation instead of rebuilding an in-progress form.
+    if (!event.newURL || new URL(event.newURL).hash === window.location.hash) render();
+  });
   document.addEventListener("visibilitychange", function () {
     if (feedPool) feedPool.suspend(document.hidden);
     if (clipViewerState && clipViewerState.pool) clipViewerState.pool.suspend(document.hidden);

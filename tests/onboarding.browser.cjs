@@ -16,11 +16,11 @@ const http = require("node:http");
     });
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  let browser;
+  let browser, page;
   try {
     const engine = process.env.BROWSER_ENGINE || "chromium";
     browser = await (engine === "webkit" ? webkit : chromium).launch({ headless: true });
-    const page = await browser.newPage(engine === "webkit" ? devices["iPhone 13"] : { viewport: { width: 390, height: 844 }, hasTouch: true });
+    page = await browser.newPage(engine === "webkit" ? devices["iPhone 13"] : { viewport: { width: 390, height: 844 }, hasTouch: true });
     const origin = process.env.TEST_BASE_URL || `http://127.0.0.1:${server.address().port}`;
     const requests = [], errors = [];
     let loginError = true, signupError = false, mailError = false, invalid = false, resetError = false, holdMail = null;
@@ -67,6 +67,8 @@ const http = require("node:http");
     await page.getByLabel("Username", { exact: true }).fill("listener");
     await page.getByLabel("Email", { exact: true }).fill("listener@example.test");
     await page.getByLabel("Password", { exact: true }).fill("new-password");
+    await page.evaluate(() => window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL: location.origin + "/#/upload", newURL: location.origin + "/#/login" })));
+    assert.equal(await page.getByLabel("Password", { exact: true }).inputValue(), "new-password");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByRole("heading", { name: "A little about you." }).waitFor();
     await page.getByLabel("Date of birth").fill("2000-01-01");
@@ -130,6 +132,8 @@ const http = require("node:http");
     await page.getByLabel("Username", { exact: true }).fill("newlistener");
     await page.getByLabel("Email", { exact: true }).fill("newlistener@example.test");
     await page.getByLabel("Password", { exact: true }).fill("new-password");
+    await page.evaluate(() => window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL: location.origin + "/#/upload", newURL: location.origin + "/#/login" })));
+    assert.equal(await page.getByLabel("Password", { exact: true }).inputValue(), "new-password");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByLabel("Date of birth").fill("2020-01-01");
     await page.getByLabel("Gender", { exact: true }).selectOption("MALE");
@@ -145,5 +149,11 @@ const http = require("node:http");
     assert.equal(created.termsVersion, "2026-10-02");
     assert.deepEqual(errors, []);
     console.log("Entry checks passed: responsive flat layouts, login validation, password visibility, two-step signup and retained fields, email request/retry, reset/reload/expiry/success, and navigation races.");
+  } catch (error) {
+    if (page) {
+      console.error("Failure page:", await page.locator("#app").innerText());
+      if (process.env.REPORT_SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.REPORT_SCREENSHOT_DIR,"entry-failure.png"),fullPage:true});
+    }
+    throw error;
   } finally { if (browser) await browser.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

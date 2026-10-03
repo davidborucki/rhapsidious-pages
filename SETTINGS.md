@@ -1,7 +1,10 @@
 # Web settings
 
-Settings keeps the account header and hides the main app sidebar. Its local menu
-uses a 29% left column on desktop and stacks above the detail panel at 700px.
+Settings opens a searchable, grouped list of rows and hides the main app sidebar.
+Each row opens a separate detail screen at `#/settings?section=...`, with a back
+link to Settings. Browser Back/Forward and direct links work; support drafts and
+search text survive navigation between settings screens. The same single-column
+layout adapts to desktop and mobile widths.
 
 Connected to the existing backend contracts:
 
@@ -15,8 +18,9 @@ Connected to the existing backend contracts:
 - `GET /app/config` → `privacyPolicyUrl` and `termsOfServiceUrl`.
   Only absolute HTTP(S) links are accepted; documents open in a new tab.
 
-No policy text is fabricated or copied into the application. Missing links and
-network failures display a retry state. Support errors retain the draft, and
+The public legal documents are included in the web build. Settings prefers configured
+backend document URLs and falls back to the local documents if config is missing or
+unavailable. These pages also work without JavaScript or a signed-in account. Support errors retain the draft, and
 failed unblocks leave the account in the list. Requests are authenticated using
 the existing web request helper. View updates are ignored after leaving Settings. Successful account deletion still
 clears the original session after navigation, but never clears a newer session.

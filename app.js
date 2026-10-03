@@ -767,6 +767,7 @@
               <span>Don’t have an account?</span>
               <a href="#/signup">Create one</a>
             </div>
+            <nav class="auth-switch" aria-label="Legal"><a href="./terms-of-service/" target="_blank" rel="noopener">Terms of Service</a> · <a href="./privacy-policy/" target="_blank" rel="noopener">Privacy Policy</a></nav>
           </div>
         </div>
       </section>
@@ -829,7 +830,7 @@
               </div>
               <label class="checkbox-field">
                 <input name="agreement" type="checkbox" required />
-                <span>I agree to use Voxxly responsibly and confirm that the information above is accurate.</span>
+                <span>I agree to the <a href="./terms-of-service/" target="_blank" rel="noopener">Terms of Service</a> and acknowledge the <a href="./privacy-policy/" target="_blank" rel="noopener">Privacy Policy</a>. I am at least 13 and, if I am a minor, have permission from a parent or legal guardian. <span class="sr-only">Policy links open in a new tab.</span></span>
               </label>
               <button id="signupSubmit" class="primary-button" type="submit">Create account</button>
             </form>
@@ -928,6 +929,14 @@
       setStatusMessage("signupStatus", { type: "error", message: "Enter a valid date of birth in the past." });
       return;
     }
+    const birthDate = new Date(dob + "T00:00:00Z");
+    const today = new Date();
+    const age = today.getUTCFullYear() - birthDate.getUTCFullYear()
+      - (today.getUTCMonth() < birthDate.getUTCMonth() || (today.getUTCMonth() === birthDate.getUTCMonth() && today.getUTCDate() < birthDate.getUTCDate()) ? 1 : 0);
+    if (!Number.isFinite(birthDate.getTime()) || age < 13) {
+      setStatusMessage("signupStatus", { type: "error", message: "You must be at least 13 to create an account." });
+      return;
+    }
     if (!form.agreement.checked) {
       setStatusMessage("signupStatus", { type: "error", message: "Confirm the account agreement to continue." });
       return;
@@ -937,7 +946,7 @@
     submitButton.textContent = "Creating account…";
     setStatusMessage("signupStatus", { type: "info", message: "Creating your Voxxly account…" });
 
-    const registration = { email, username, password, gender, dob };
+    const registration = { email, username, password, gender, dob, termsVersion: "2026-10-02", privacyVersion: "2026-10-02" };
 
     try {
       await requestJson(authConfig.registerPath || "/ios/users", {
@@ -4371,6 +4380,11 @@
   }
 
   function render() {
+    // Keep settings state (including unsent support drafts) across its nested routes.
+    if (settingsCleanup && currentUser && activeRoute === routes.settings && getRoute() === routes.settings) {
+      settingsCleanup.updateRoute();
+      return;
+    }
     if (settingsCleanup) { settingsCleanup(); settingsCleanup = null; }
     closeProfileEditor();
     closeVideoReport();

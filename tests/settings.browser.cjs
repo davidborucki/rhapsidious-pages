@@ -32,7 +32,18 @@ const assert = require("node:assert/strict");
     });
     await page.addInitScript(() => localStorage.setItem("voxxly_web_access_token", "test-token"));
     await page.goto("http://127.0.0.1:8765/#/settings");
-    await page.getByRole("heading", { name: "Manage account", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "Settings", exact: true }).waitFor();
+    assert.equal(await page.locator("[data-section]").count(), 6);
+    assert.equal(await page.locator(".settings-detail").isVisible(), false);
+    assert.ok(!requests.some(req => req.path === "/me/blocked-users"));
+    async function openSection(name) {
+      const back = page.getByRole("link", { name: "Back to settings", exact: true });
+      if (await back.isVisible()) await back.click();
+      await page.getByRole("link", { name, exact: true }).click();
+      await page.getByRole("heading", { name, exact: true }).waitFor();
+      assert.equal(await page.locator(".settings-home").isVisible(), false);
+    }
+    await openSection("Manage account");
     assert.equal(await page.locator("#primaryNav").isVisible(), false);
     assert.equal(await page.locator(".site-header").isVisible(), true);
     await page.getByRole("button", { name: "Delete account", exact: true }).click();
@@ -40,32 +51,41 @@ const assert = require("node:assert/strict");
     assert.ok(!requests.some(req => req.path === "/me/account"));
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     assert.ok(!requests.some(req => req.path === "/me/account"));
+    await page.getByRole("link", { name: "Back to settings", exact: true }).click();
     for (const width of [390, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });
-      const layout = await page.evaluate(() => {
-        const menu = document.querySelector(".settings-menu").getBoundingClientRect();
-        const panel = document.querySelector(".settings-detail").getBoundingClientRect();
-        return { overflow: document.documentElement.scrollWidth > innerWidth, beside: panel.left > menu.right, menu: menu.width, panel: panel.width };
-      });
+      const layout = await page.evaluate(() => ({
+        overflow: document.documentElement.scrollWidth > innerWidth,
+        detailHidden: document.querySelector(".settings-detail").hidden,
+        rows: Array.from(document.querySelectorAll("[data-section]")).filter(row => !row.hidden).length
+      }));
       assert.equal(layout.overflow, false);
-      assert.equal(layout.beside, width > 700);
-      if (width > 700) assert.ok(layout.panel > layout.menu);
+      assert.equal(layout.detailHidden, true);
+      assert.equal(layout.rows, 6);
       if (process.env.SETTINGS_SCREENSHOT_DIR) await page.screenshot({ path: require("node:path").join(process.env.SETTINGS_SCREENSHOT_DIR, "voxxly-settings-" + width + ".png"), fullPage: true });
     }
-    await page.getByRole("button", { name: "Blocked users", exact: true }).click();
+    await page.getByRole("searchbox", { name: "Search settings" }).fill("privacy");
+    assert.equal(await page.locator("[data-section]:visible").count(), 1);
+    await page.getByRole("searchbox", { name: "Search settings" }).fill("no matching setting");
+    await page.getByText("No settings found.").waitFor();
+    await page.getByRole("searchbox", { name: "Search settings" }).fill("");
+    await openSection("Blocked users");
     await page.getByRole("button", { name: "Unblock blocked_person" }).click();
     await page.getByText("Couldn’t unblock this user. Please try again.").waitFor();
     assert.equal(await page.locator("[data-unblock]").count(), 1);
     failUnblock = false;
     await page.getByRole("button", { name: "Unblock blocked_person" }).click();
     await page.getByRole("heading", { name: "No blocked users" }).waitFor();
-    await page.getByRole("button", { name: "Contact support", exact: true }).click();
+    await openSection("Contact support");
     assert.equal(await page.locator("#sendSupport").isDisabled(), true);
     await page.locator("#supportMessage").fill("The clip audio stopped.");
-    await page.getByRole("button", { name: "Privacy policy", exact: true }).click();
+    await openSection("Privacy policy");
     await page.getByRole("link", { name: /Open privacy policy/ }).waitFor();
     assert.equal(await page.getByRole("link", { name: /Open privacy policy/ }).getAttribute("href"), "https://example.com/privacy");
-    await page.getByRole("button", { name: "Contact support", exact: true }).click();
+    await page.goBack();
+    await page.getByRole("heading", { name: "Settings", exact: true }).waitFor();
+    await page.goBack();
+    await page.getByRole("heading", { name: "Contact support", exact: true }).waitFor();
     assert.equal(await page.locator("#supportMessage").inputValue(), "The clip audio stopped.");
     await page.locator("#sendSupport").click();
     await page.getByText(/We couldn’t confirm delivery/).waitFor();
@@ -75,7 +95,7 @@ const assert = require("node:assert/strict");
     await page.getByRole("heading", { name: "Message sent" }).waitFor();
     assert.equal(requests.filter(req => req.path === "/support/tickets").length, 2);
     assert.ok(!requests.some(req => /deactiv|\/account$/.test(req.path)));
-    await page.getByRole("button", { name: "Manage account", exact: true }).click();
+    await openSection("Manage account");
     await page.getByRole("button", { name: "Delete account", exact: true }).click();
     await page.getByRole("button", { name: "Delete account", exact: true }).click();
     await page.getByText("Couldn’t delete your account. Please try again.").waitFor();
@@ -93,6 +113,6 @@ const assert = require("node:assert/strict");
     await page.getByText("Your account has been deleted.", { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => localStorage.getItem("voxxly_web_access_token")), null);
     assert.ok(requests.filter(req => req.path === "/me/account").every(req => req.method === "DELETE" && req.data === null));
-    console.log("Settings browser checks passed: responsive layouts, existing settings, deletion cancellation, failure/retry, duplicate clicks and sign-out after navigation.");
+    console.log("Settings browser checks passed: list/detail navigation, search, browser Back, responsive layouts, existing settings, deletion cancellation, failure/retry, duplicate clicks and sign-out after navigation.");
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -27,7 +27,9 @@
     const request = options.request;
     const user = options.user;
     let active = true;
-    let selected = "account";
+    let selected = null;
+    let searchQuery = "";
+    let lastSection = null;
     let blocked = null;
     let loadingBlocked = false;
     let blockedError = "";
@@ -42,25 +44,74 @@
     let submitted = false;
     let supportError = "";
     const draft = { category: "ACCOUNT_ISSUE", message: "", email: user.email || "" };
+    const paths = {
+      account: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',
+      blocked: '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
+      content: '<path d="M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7z"/><path d="M12 8v5m0 3h.01"/>',
+      support: '<path d="M4 14v-3a8 8 0 0 1 16 0v3M4 12H2v6h4v-6zm16 0h2v6h-4v-6zm0 6c0 3-4 3-8 3"/>',
+      privacy: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/>',
+      terms: '<path d="M14 2H5v20h14V7zM14 2v5h5M8 12h8M8 16h8"/>'
+    };
+    const icon = id => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[id]}</svg>`;
+    const groups = [
+      ["Your account", ["account"]],
+      ["Privacy and content", ["blocked", "content"]],
+      ["Support and about", ["support", "privacy", "terms"]]
+    ];
     host.innerHTML = `
       <section class="page-wrap settings-page" aria-label="Settings">
-        <a class="secondary-button settings-back-button" href="#/profile" aria-label="Back to profile" title="Back to profile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7M5 12h14" /></svg></a>
-        <div class="settings-layout">
+        <header class="settings-heading">
+          <a class="secondary-button settings-back-button" href="#/profile" aria-label="Back to profile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></a>
+          <h1 id="settingsTitle" tabindex="-1">Settings</h1>
+        </header>
+        <div class="settings-home">
+          <label class="settings-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></svg><input type="search" placeholder="Search settings" aria-label="Search settings" autocomplete="off"></label>
           <nav class="settings-menu" aria-label="Settings sections">
-            <h2>Settings</h2>
-            ${sections.map(([id, title]) => `<button type="button" data-section="${id}" aria-controls="settingsDetail">${title}</button>`).join("")}
+            ${groups.map(([heading, ids]) => `<section class="settings-group"><h2>${heading}</h2>${ids.map(id => {
+              const title = sections.find(item => item[0] === id)[1];
+              return `<a class="settings-row" data-section="${id}" href="#/settings?section=${id}">${icon(id)}<span>${title}</span><svg class="settings-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a>`;
+            }).join("")}</section>`).join("")}
           </nav>
-          <section class="settings-detail" id="settingsDetail" aria-labelledby="settingsTitle"></section>
+          <p class="settings-empty" role="status" hidden>No settings found.</p>
         </div>
+        <section class="settings-detail" id="settingsDetail" aria-labelledby="settingsTitle" hidden></section>
       </section>`;
     const detail = host.querySelector("#settingsDetail");
+    const home = host.querySelector(".settings-home");
+    const titleElement = host.querySelector("#settingsTitle");
+    const back = host.querySelector(".settings-back-button");
+    const search = host.querySelector(".settings-search input");
+    function filterSections() {
+      const query = searchQuery.trim().toLocaleLowerCase();
+      let visible = 0;
+      host.querySelectorAll(".settings-group").forEach(group => {
+        let matches = 0;
+        group.querySelectorAll("[data-section]").forEach(row => {
+          row.hidden = !row.textContent.toLocaleLowerCase().includes(query);
+          if (!row.hidden) { matches += 1; visible += 1; }
+        });
+        group.hidden = matches === 0;
+      });
+      host.querySelector(".settings-empty").hidden = visible > 0;
+    }
+    search.addEventListener("input", () => { searchQuery = search.value; filterSections(); });
     function render(focus) {
       if (!active) return;
-      host.querySelectorAll("[data-section]").forEach(button => {
-        if (button.dataset.section === selected) button.setAttribute("aria-current", "page");
-        else button.removeAttribute("aria-current");
-      });
-      const title = sections.find(item => item[0] === selected)[1];
+      home.hidden = selected !== null;
+      detail.hidden = selected === null;
+      back.href = selected ? "#/settings" : "#/profile";
+      back.setAttribute("aria-label", selected ? "Back to settings" : "Back to profile");
+      titleElement.textContent = selected ? sections.find(item => item[0] === selected)[1] : "Settings";
+      if (!selected) {
+        detail.innerHTML = "";
+        filterSections();
+        if (focus) {
+          const previous = lastSection && host.querySelector(`[data-section="${lastSection}"]`);
+          (previous && !previous.hidden ? previous : titleElement).focus({ preventScroll: true });
+        }
+        return;
+      }
+      if (focus) titleElement.focus({ preventScroll: true });
       let body = "";
       if (selected === "account") {
         body = `<div class="settings-item">
@@ -94,13 +145,13 @@
             <button class="primary-button" id="sendSupport" ${submitting || !supportPayload(draft.category, draft.message, draft.email) ? "disabled" : ""}>${submitting ? "Sending…" : "Send message"}</button>
           </form>`;
       } else {
-        const url = links && legalUrl(links[selected === "privacy" ? "privacyPolicyUrl" : "termsOfServiceUrl"]);
+        const url = (links && legalUrl(links[selected === "privacy" ? "privacyPolicyUrl" : "termsOfServiceUrl"]))
+          || new URL(selected === "privacy" ? "./privacy-policy/" : "./terms-of-service/", window.location.href).href;
         body = `<p class="settings-intro">${selected === "privacy" ? "Read how your information is collected, used and handled." : "Review the terms that apply when you use Voxxly."}</p>`;
         if (url) body += `<a class="secondary-button" href="${escape(url)}" target="_blank" rel="noopener noreferrer">Open ${selected === "privacy" ? "privacy policy" : "terms of service"}<span class="sr-only"> (opens in a new tab)</span></a>`;
         else body += `<p class="settings-error" role="alert">${escape(linksError || "This document’s link hasn’t been configured yet.")}</p><button class="secondary-button" data-retry="links">Try again</button>`;
       }
-      detail.innerHTML = `<h1 id="settingsTitle" tabindex="-1">${title}</h1>${body}`;
-      if (focus) detail.querySelector("h1").focus({ preventScroll: true });
+      detail.innerHTML = body;
       bindDetail();
     }
     async function loadBlocked() {
@@ -172,7 +223,7 @@
           unblocking.delete(id);
           if (active && selected === "blocked") {
             render();
-            detail.querySelector("h1").focus({ preventScroll: true });
+            titleElement.focus({ preventScroll: true });
           }
         }
       }));
@@ -201,15 +252,25 @@
         finally { submitting = false; if (active && selected === "support") render(true); }
       });
     }
-    host.querySelectorAll("[data-section]").forEach(button => button.addEventListener("click", function () {
-      if (!deleting) { confirmingDeletion = false; deletionError = ""; }
-      selected = button.dataset.section;
-      render(true);
+    function updateRoute(focus = true) {
+      if (!active) return;
+      const query = new URLSearchParams(window.location.hash.split("?")[1] || "");
+      const candidate = query.get("section");
+      const next = sections.some(item => item[0] === candidate) ? candidate : null;
+      if (selected !== next) {
+        if (selected) lastSection = selected;
+        if (!deleting) { confirmingDeletion = false; deletionError = ""; }
+      }
+      selected = next;
+      render(focus);
+      if (focus) window.scrollTo({ top: 0, behavior: "instant" });
       if (selected === "blocked" && blocked === null && !blockedError) loadBlocked();
       if (["privacy", "terms"].includes(selected) && !links && !linksError) loadLinks();
-    }));
-    render();
-    return function () { active = false; };
+    }
+    updateRoute(false);
+    const cleanup = function () { active = false; };
+    cleanup.updateRoute = updateRoute;
+    return cleanup;
   }
   const api = { mount: mount, supportPayload: supportPayload, legalUrl: legalUrl };
   if (typeof module === "object" && module.exports) module.exports = api;

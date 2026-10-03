@@ -1,0 +1,79 @@
+/* Shared by the public legal and support pages. */
+:root { color-scheme: dark; --page: #090d10; --text: #f3f4f5; --muted: #a8afb4; --line: #283037; --accent: #f47604; --link: #ffa14d; --header-height: 80px; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--page); color: var(--text); font: 16px/1.7 Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+a { color: var(--link); text-underline-offset: 4px; text-decoration-thickness: 1px; }
+a:hover { text-decoration: underline; }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 2px; }
+.site-header { position: sticky; top: 0; z-index: 10; background: var(--page); border-bottom: 1px solid var(--line); }
+.header-inner { max-width: 1256px; min-height: var(--header-height); padding: 18px 32px; margin: auto; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.wordmark { color: var(--text); font-size: 30px; font-weight: 800; letter-spacing: -1.8px; line-height: 1; }
+.header-links { display: flex; flex-wrap: wrap; gap: 10px 26px; font-size: 14px; }
+.header-links a { color: var(--muted); text-decoration: none; }
+.header-links a:hover, .header-links a[aria-current="page"] { color: var(--text); }
+.legal-layout { max-width: 1256px; margin: auto; padding: 72px 32px 100px; display: grid; grid-template-columns: 268px minmax(0, 1fr); gap: 76px; align-items: start; }
+.outline { position: sticky; top: 116px; max-height: calc(100dvh - 144px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; overscroll-behavior: contain; padding: 1px 8px 1px 0; }
+.outline summary { display: none; }
+.outline-list { border-left: 1px solid var(--line); }
+.outline-link { position: relative; display: block; padding: 8px 12px 8px 18px; color: var(--muted); text-decoration: none; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.outline-link:hover { color: var(--text); text-decoration: none; }
+.outline-link[aria-current="location"] { color: var(--link); font-weight: 700; }
+.outline-link[aria-current="location"]::before { content: ""; position: absolute; left: -1px; top: 5px; bottom: 5px; width: 3px; border-radius: 2px; background: var(--accent); }
+.policy { min-width: 0; }
+h1 { font-size: clamp(32px, 4vw, 48px); line-height: 1.12; letter-spacing: -1.6px; margin: 0 0 20px; font-weight: 750; }
+.updated { margin: 0 0 54px; color: var(--muted); font-size: 15px; }
+.policy section { margin: 0 0 42px; scroll-margin-top: 116px; }
+h2 { margin: 0 0 16px; font-size: 22px; line-height: 1.4; letter-spacing: -.3px; }
+p { margin: 0 0 18px; overflow-wrap: anywhere; }
+.policy p { color: #d5dade; }
+strong { color: var(--text); }
+.site-footer { border-top: 1px solid var(--line); max-width: 1192px; padding: 28px 0 40px; margin: 0 auto; color: var(--muted); font-size: 14px; display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+.site-footer a { color: var(--muted); overflow-wrap: anywhere; }
+.skip { position: fixed; left: 20px; top: -100px; z-index: 20; padding: 10px 16px; background: var(--page); }
+.skip:focus { top: 12px; }
+.support-page { max-width: 824px; margin: auto; padding: 76px 32px 100px; min-height: calc(100dvh - 202px); }
+.support-intro { color: var(--muted); margin: 0 0 34px; }
+.contact-button { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 10px 24px; border-radius: 8px; background: var(--accent); color: #090d10; font-weight: 700; text-decoration: none; }
+.contact-button:hover { background: #ff932f; text-decoration: none; }
+.help-options { margin: 44px 0 26px; border-top: 1px solid var(--line); }
+.help-option { display: block; padding: 22px 0; border-bottom: 1px solid var(--line); text-decoration: none; }
+.help-option strong { display: flex; justify-content: space-between; align-items: center; font-size: 17px; }
+.help-option span { display: block; color: var(--muted); font-size: 15px; margin-top: 4px; }
+.help-option:hover { text-decoration: none; }
+.help-option:hover strong { color: var(--link); }
+.support-note { color: var(--muted); font-size: 14px; }
+@media (max-width: 1100px) { .legal-layout { gap: 42px; grid-template-columns: 240px minmax(0, 1fr); } .site-footer { margin-inline: 32px; } }
+@media (max-width: 760px) {
+  :root { --header-height: 72px; }
+  .header-inner { padding: 20px; gap: 16px; }
+  .wordmark { font-size: 27px; }
+  .header-links { gap: 8px 15px; font-size: 12px; }
+  .legal-layout { display: block; padding: 30px 20px 52px; }
+  .outline { position: relative; top: auto; max-height: none; overflow: visible; padding: 0; margin-bottom: 32px; }
+  .outline summary { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; font-size: 14px; font-weight: 700; cursor: pointer; border-bottom: 1px solid var(--line); list-style: none; }
+  .outline summary::after { content: "+"; font-size: 20px; color: var(--link); }
+  .outline[open] summary::after { content: "−"; }
+  .outline summary::-webkit-details-marker { display: none; }
+  .outline-list { margin-top: 14px; }
+  .outline-link { padding-block: 10px; }
+  h1 { font-size: 34px; letter-spacing: -1px; }
+  .updated { margin-bottom: 36px; font-size: 14px; }
+  h2 { font-size: 21px; }
+  .policy section { margin-bottom: 34px; scroll-margin-top: 98px; }
+  .site-footer { margin-inline: 20px; display: block; padding-top: 24px; }
+  .site-footer p { margin-bottom: 8px; }
+  .support-page { padding: 42px 20px 60px; }
+}
+@media (min-width: 761px) { .outline:not([open]) > .outline-list { display: block; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+@media print {
+  :root { color-scheme: light; }
+  body { background: white; color: black; font-size: 11pt; }
+  .site-header, .outline, .skip { display: none; }
+  .legal-layout { display: block; padding: 0; max-width: none; }
+  .policy p, strong, a, .updated, .site-footer { color: black; }
+  .site-footer { margin: 0; }
+  h1 { font-size: 28pt; }
+  .policy section { break-inside: avoid; }
+}

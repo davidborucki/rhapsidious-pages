@@ -683,6 +683,8 @@
       if (!heading) {
         return;
       }
+      const focused = document.activeElement;
+      if (focused && app.contains(focused) && focused.matches("input, select, textarea, button, a, [contenteditable=true]")) return;
       heading.setAttribute("tabindex", "-1");
       heading.focus({ preventScroll: true });
     });

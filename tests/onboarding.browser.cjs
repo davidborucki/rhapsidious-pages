@@ -21,6 +21,15 @@ const http = require("node:http");
     const engine = process.env.BROWSER_ENGINE || "chromium";
     browser = await (engine === "webkit" ? webkit : chromium).launch({ headless: true });
     page = await browser.newPage(engine === "webkit" ? devices["iPhone 13"] : { viewport: { width: 390, height: 844 }, hasTouch: true });
+    await page.addInitScript(() => {
+      window.signupAttempts = [];
+      document.addEventListener("submit", event => {
+        if (event.target.id === "signupForm") {
+          const email = event.target.elements.email;
+          window.signupAttempts.push({ email: email.value, valid: email.validity.valid, missing: email.validity.valueMissing, mismatch: email.validity.typeMismatch });
+        }
+      }, true);
+    });
     const origin = process.env.TEST_BASE_URL || `http://127.0.0.1:${server.address().port}`;
     const requests = [], errors = [];
     let loginError = true, signupError = false, mailError = false, invalid = false, resetError = false, holdMail = null;
@@ -63,8 +72,16 @@ const http = require("node:http");
     await page.getByRole("button", { name: "Hide password", exact: true }).click();
     await page.getByRole("button", { name: "Log in", exact: true }).click();
     await page.getByText("Incorrect username or password.").waitFor();
+    // A delayed page announcement must never steal focus while someone starts typing.
+    await page.evaluate(() => {
+      window.originalFrame = window.requestAnimationFrame;
+      window.requestAnimationFrame = callback => window.originalFrame(() => setTimeout(callback, 250));
+    });
     await page.getByRole("link", { name: "Create an account", exact: true }).click();
     await page.getByLabel("Username", { exact: true }).fill("listener");
+    await page.evaluate(() => { window.requestAnimationFrame = window.originalFrame; });
+    await page.waitForTimeout(350);
+    assert.equal(await page.evaluate(() => document.activeElement.id), "signupUsername");
     await page.getByLabel("Email", { exact: true }).fill("listener@example.test");
     await page.getByLabel("Password", { exact: true }).fill("new-password");
     await page.evaluate(() => window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL: location.origin + "/#/upload", newURL: location.origin + "/#/login" })));
@@ -152,6 +169,8 @@ const http = require("node:http");
   } catch (error) {
     if (page) {
       console.error("Failure page:", await page.locator("#app").innerText());
+      console.error("Signup attempts:", await page.evaluate(() => window.signupAttempts));
+      console.error("Field state:", await page.locator("input:not([type=password])").evaluateAll(nodes => nodes.map(input => ({ id: input.id, value: input.value, type: input.type, valid: input.validity.valid, missing: input.validity.valueMissing, mismatch: input.validity.typeMismatch, message: input.validationMessage }))));
       if (process.env.REPORT_SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.REPORT_SCREENSHOT_DIR,"entry-failure.png"),fullPage:true});
     }
     throw error;

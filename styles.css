@@ -2797,8 +2797,21 @@ html.clip-viewer-open body {
   width: min(624px, calc(56.25dvh + 57px), calc(100vw - 180px));
 }
 .clip-viewer-stage .clip-viewer-dialog {
+  --clip-viewer-control-inset: 18px;
   grid-column: 1;
   width: 100%;
+}
+/* Keep both controls attached to the video through dragging and animation. */
+.clip-viewer-dialog > .feed-volume-control {
+  top: var(--clip-viewer-control-inset);
+  left: var(--clip-viewer-control-inset);
+}
+.clip-viewer-dialog > .clip-viewer-close {
+  z-index: 4;
+  top: var(--clip-viewer-control-inset);
+  right: var(--clip-viewer-control-inset);
+  width: 44px;
+  height: 44px;
 }
 .video-report #videoReportTitle { outline: none; }
 .video-report-action:focus-visible {

@@ -3242,7 +3242,6 @@
       animation.finished.catch(function () {}).then(function () {
         if (state.transition === animation) {
           state.transition = null;
-          if (state.alignClose) state.alignClose();
         }
       });
     }
@@ -3252,7 +3251,6 @@
   function bindClipViewerNavigation(state) {
     const overlay = state.overlay;
     const stage = overlay.querySelector(".clip-viewer-stage");
-    const close = overlay.querySelector("[data-clip-viewer-close]");
     let gesture = null;
     let suppressClickUntil = 0;
     let wheelDistance = 0;
@@ -3260,7 +3258,7 @@
     let wheelTimer = null;
     const blocked = target => Boolean(target.closest("button, a, input, select, textarea, [data-feed-volume-control]"));
     const active = () => clipViewerState === state && !document.getElementById("videoReport");
-    const resetDrag = () => { gesture = null; stage.style.transform = ""; alignClose(); };
+    const resetDrag = () => { gesture = null; stage.style.transform = ""; };
     stage.addEventListener("pointerdown", function (event) {
       if (!event.isPrimary) { resetDrag(); return; }
       if (!active() || event.pointerType === "mouse" || blocked(event.target)) return;
@@ -3317,25 +3315,8 @@
       wheelConsumed = true;
       moveClipViewer(wheelDistance > 0 ? 1 : -1);
     }, { passive: false });
-    const alignClose = function () {
-      const mute = overlay.querySelector("[data-feed-mute-toggle]");
-      if (!mute || clipViewerState !== state) return;
-      const rect = mute.getBoundingClientRect();
-      const top = rect.top + rect.height / 2 - overlay.getBoundingClientRect().top - close.offsetHeight / 2;
-      close.style.top = `${top}px`;
-    };
-    state.alignClose = alignClose;
-    const observer = new ResizeObserver(alignClose);
-    observer.observe(stage);
-    observer.observe(overlay);
-    window.addEventListener("resize", alignClose);
-    if (window.visualViewport) window.visualViewport.addEventListener("resize", alignClose);
-    alignClose();
     return function () {
       clearTimeout(wheelTimer);
-      observer.disconnect();
-      window.removeEventListener("resize", alignClose);
-      if (window.visualViewport) window.visualViewport.removeEventListener("resize", alignClose);
       if (state.transition) state.transition.cancel();
       resetDrag();
     };
@@ -3398,11 +3379,11 @@
     overlay.setAttribute("aria-modal", "true");
     overlay.setAttribute("aria-labelledby", "clipViewerTitle");
     overlay.innerHTML = `
-      <button class="clip-viewer-close" type="button" data-clip-viewer-close aria-label="Close clip viewer"></button>
       <div class="clip-viewer-stage">
       <section class="clip-viewer-dialog">
         <video class="clip-viewer-video" data-clip-viewer-video playsinline loop preload="metadata" tabindex="0" role="button"></video>
         ${renderVideoVolumeControl(selectedClip.name)}
+        <button class="clip-viewer-close" type="button" data-clip-viewer-close aria-label="Close clip viewer"></button>
         <span class="clip-viewer-play-indicator" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="m6.5 5 11 7-11 7V5Z"></path></svg>
         </span>

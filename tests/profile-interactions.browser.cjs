@@ -1,5 +1,5 @@
 "use strict";
-// NODE_PATH=<Playwright runtime> node tests/video-report.browser.cjs
+// NODE_PATH=<Playwright runtime> node tests/profile-interactions.browser.cjs
 // Serves this checkout locally; all backend calls are intercepted.
 const { chromium, webkit, devices } = require("playwright");
 const assert = require("node:assert/strict");
@@ -23,7 +23,55 @@ const http = require("node:http");
     browser = await (process.env.BROWSER_ENGINE === "webkit" ? webkit : chromium).launch({ headless: true, executablePath: process.env.REPORT_BROWSER_PATH || undefined });
     const page = await browser.newPage(process.env.BROWSER_ENGINE === "webkit" ? { ...devices["iPhone 13"] } : { viewport: { width: 390, height: 844 }, hasTouch: true });
     const touchSession = process.env.BROWSER_ENGINE === "webkit" ? null : await page.context().newCDPSession(page);
+    // Check painted geometry and hit testing, not just the final resting layout.
+    await page.addInitScript(() => {
+      window.startViewerControlAudit = () => {
+        const overlay = document.querySelector(".clip-viewer-backdrop");
+        const close = overlay.querySelector("[data-clip-viewer-close]");
+        const frame = overlay.querySelector(".clip-viewer-dialog");
+        const volume = overlay.querySelector("[data-feed-volume-control]");
+        const mute = overlay.querySelector("[data-feed-mute-toggle]");
+        const errors = [];
+        let samples = 0, raf;
+        const sample = () => {
+          samples++;
+          const c = close.getBoundingClientRect(), f = frame.getBoundingClientRect();
+          const v = volume.getBoundingClientRect(), m = mute.getBoundingClientRect();
+          const style = getComputedStyle(close);
+          const problem = [];
+          if (!close.isConnected || overlay.querySelector("[data-clip-viewer-close]") !== close) problem.push("close replaced or detached");
+          if (close.parentElement !== frame || volume.parentElement !== frame) problem.push("controls must share the video frame");
+          if (Math.abs(c.y + c.height / 2 - m.y - m.height / 2) > 1) problem.push("vertical alignment");
+          if (Math.abs(v.left - f.left - (f.right - c.right)) > 1) problem.push("unequal side insets");
+          if (Math.abs(c.height - v.height) > 1) problem.push("unequal button sizes");
+          if (style.visibility !== "visible" || style.display === "none" || Number(style.opacity) === 0) problem.push("close hidden");
+          const x = c.x + c.width / 2, y = c.y + c.height / 2;
+          // During a drag, both controls can travel beyond the viewport together.
+          if (x > 0 && x < innerWidth && y > 0 && y < innerHeight && !close.contains(document.elementFromPoint(x, y))) problem.push("close occluded");
+          if (problem.length && errors.length < 5) errors.push({ problem, close: c.toJSON(), frame: f.toJSON(), mute: m.toJSON() });
+        };
+        const tick = () => { sample(); raf = requestAnimationFrame(tick); };
+        const events = ["pointermove", "pointerup", "pointercancel"];
+        events.forEach(type => overlay.addEventListener(type, sample));
+        tick();
+        window.finishViewerControlAudit = () => {
+          cancelAnimationFrame(raf);
+          events.forEach(type => overlay.removeEventListener(type, sample));
+          sample();
+          return { samples, errors };
+        };
+      };
+    });
+    async function startControlAudit() {
+      await page.evaluate(() => window.startViewerControlAudit());
+    }
+    async function finishControlAudit() {
+      const result = await page.evaluate(() => window.finishViewerControlAudit());
+      assert.ok(result.samples > 1);
+      assert.deepEqual(result.errors, [], JSON.stringify(result));
+    }
     async function swipe(target, dx, dy, cancel = false) {
+      await startControlAudit();
       const box = await target.boundingBox();
       const x = box.x + box.width * 0.35;
       const y = box.y + box.height * 0.5;
@@ -47,6 +95,7 @@ const http = require("node:http");
         }, { x, y, dx, dy, cancel });
       }
       await page.waitForTimeout(260);
+      await finishControlAudit();
     }
     const failures = [];
     page.on("pageerror", error => failures.push(error.message));
@@ -90,13 +139,8 @@ const http = require("node:http");
       await page.waitForFunction(() => !document.querySelector(".clip-viewer-backdrop [data-save-clip]").disabled);
       for (const [width, height] of [[320, 568], [390, 844], [1440, 900]]) {
         await page.setViewportSize({ width, height });
-        await page.waitForFunction(() => {
-          const mute = document.querySelector(".clip-viewer-backdrop [data-feed-mute-toggle]").getBoundingClientRect();
-          const close = document.querySelector("[data-clip-viewer-close]").getBoundingClientRect();
-          return Math.abs(mute.y + mute.height / 2 - close.y - close.height / 2) < 1;
-        });
-        const closeBox = await viewer.locator("[data-clip-viewer-close]").boundingBox();
-        assert.ok(Math.abs(closeBox.x + closeBox.width - (width - (width <= 760 ? 14 : 20))) < 1, "Close keeps its horizontal position");
+        await startControlAudit();
+        await finishControlAudit();
         const geometry = await rail.evaluate(el => {
           const children = [...el.children];
           const boxes = children.map(c => c.getBoundingClientRect());
@@ -172,7 +216,38 @@ const http = require("node:http");
       await swipe(video, 0, 120);
       assert.equal(await rail.locator("[data-like-clip]").getAttribute("aria-pressed"), "true");
       assert.equal(await save.getAttribute("aria-pressed"), "true");
+      // Seek every part of both animations, including mobile toolbar-sized
+      // viewport changes and navigation interrupted by a reverse direction change.
+      await startControlAudit();
+      for (const key of ["ArrowDown", "ArrowUp", "ArrowDown"]) {
+        await page.evaluate(key => {
+          document.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+          document.querySelector(".clip-viewer-stage").getAnimations().forEach(animation => animation.pause());
+        }, key);
+        for (const time of [0, 16, 55, 110, 180, 219]) {
+          await page.evaluate(time => {
+            document.querySelector(".clip-viewer-stage").getAnimations().forEach(animation => { animation.currentTime = time; });
+          }, time);
+          await page.setViewportSize({ width: 390, height: time % 2 ? 760 : 844 });
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        }
+      }
+      await finishControlAudit();
+      if (process.env.REPORT_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.REPORT_SCREENSHOT_DIR, `profile-${userId}-${process.env.BROWSER_ENGINE || "chromium"}-after-transition.png`) });
+      // A real tap on X must close even while the incoming frame is animated.
+      await page.evaluate(() => {
+        document.querySelector(".clip-viewer-stage").getAnimations().forEach(animation => { animation.currentTime = 55; });
+      });
+      const closeBox = await viewer.locator("[data-clip-viewer-close]").boundingBox();
+      await page.touchscreen.tap(closeBox.x + closeBox.width / 2, closeBox.y + closeBox.height / 2);
+      await viewer.waitFor({ state: "detached" });
+      // Reduced motion takes the same path without an animation.
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.locator(`[data-view-clip="${clipId}"]`).click();
+      await swipe(viewer.locator("[data-clip-viewer-video]"), 0, -120);
+      assert.equal(await viewer.locator("[data-report-clip]").getAttribute("data-report-clip"), String(clipId + 1));
       await viewer.locator("[data-clip-viewer-close]").click();
+      await page.emulateMedia({ reducedMotion: "no-preference" });
     }
     // The feed uses the exact same rendered stack and report focus behavior.
     await page.goto(origin + "/#/feed");
@@ -182,6 +257,6 @@ const http = require("node:http");
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     assert.equal(await report.evaluate(el => el.matches(":focus-visible")), false);
     assert.deepEqual(failures, []);
-    console.log("Profile interaction checks passed: own/other profiles, exact stack order, responsive layout, close/mute alignment, vertical swipes and boundaries, Watch/Like/Save/Repost/Report, failed-save rollback, navigation state, report focus and pointer/keyboard dismissal.");
+    console.log("Profile interaction checks passed: own/other profiles, exact stack order, responsive layout, equal close/mute insets and continuous visibility through drag/animation/viewport changes, mid-transition close, reduced motion, vertical swipes and boundaries, Watch/Like/Save/Repost/Report, failed-save rollback, navigation state, report focus and pointer/keyboard dismissal.");
   } finally { if (browser) await browser.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

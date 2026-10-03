@@ -42,6 +42,7 @@
     signup: "#/signup",
     forgotPassword: "#/forgot-password",
     resetPassword: "#/reset-password",
+    confirmEmail: "#/confirm-email",
     feed: "#/feed",
     saved: "#/saved",
     search: "#/search",
@@ -65,6 +66,9 @@
     return user;
   }
   let currentUser = null;
+  let verificationSentAt = 0;
+  let verificationSending = false;
+  let verificationRefresh = null;
   let activeRoute = null;
   let authNotice = null;
   let accessTokenMemory = safeStorageGet(window.localStorage, accessTokenStorageKey);
@@ -643,7 +647,7 @@
   }
 
   function syncShell(route) {
-    const isAuthRoute = [routes.login, routes.signup, routes.forgotPassword, routes.resetPassword].includes(route) || !route;
+    const isAuthRoute = [routes.login, routes.signup, routes.forgotPassword, routes.resetPassword, routes.confirmEmail].includes(route) || !route;
     const isSignedIn = Boolean(currentUser) && !isAuthRoute;
     document.documentElement.classList.toggle("auth-route", isAuthRoute);
     document.documentElement.classList.toggle("feed-route", route === routes.feed);
@@ -736,6 +740,8 @@
   }
 
   function clearSession() {
+    verificationSentAt = 0;
+    verificationSending = false;
     currentUser = null;
     cleanupFeedObservers(true);
     clearTokens();
@@ -862,6 +868,89 @@
   }
 
   let passwordResetSecret = "";
+  function verificationPrompt() {
+    return `<div class="email-verification"><p>Confirm your email to upload.</p><button class="secondary-button" type="button" data-send-verification ${verificationSending ? "disabled" : ""}>${verificationSending ? "Sending…" : verificationSentAt ? "Resend link" : "Send link"}</button></div>`;
+  }
+
+  function bindVerificationPrompt() {
+    const button = app.querySelector("[data-send-verification]");
+    if (!button) return;
+    button.addEventListener("click", async () => {
+      if (verificationSending) return;
+      if (verificationSentAt && Date.now() - verificationSentAt < 60000) {
+        showToast("Check your email. You can resend in a minute."); return;
+      }
+      const generation = sessionGeneration;
+      verificationSending = true; button.disabled = true; button.textContent = "Sending…";
+      try {
+        await requestJson("/me/email-verification", { method: "POST" });
+        if (generation !== sessionGeneration || !currentUser) return;
+        verificationSentAt = Date.now(); showToast("Confirmation link sent");
+        await refreshEmailConfirmation();
+      } catch (error) {
+        if (generation !== sessionGeneration || !currentUser) return;
+        showToast(error.status === 429 ? "Wait a minute before resending." : "Couldn’t send email. Try again.");
+      } finally {
+        if (generation === sessionGeneration) {
+          verificationSending = false;
+          const activeButton = app.querySelector("[data-send-verification]");
+          if (activeButton) { activeButton.disabled = false; activeButton.textContent = verificationSentAt ? "Resend link" : "Send link"; }
+        }
+      }
+    });
+  }
+
+  async function refreshEmailConfirmation() {
+    if (!currentUser || currentUser.emailConfirmed === true) return;
+    if (verificationRefresh) return verificationRefresh;
+    const userId = currentUser.id, generation = sessionGeneration;
+    const pending = (async () => {
+      try {
+        const me = await requestJson(authConfig.mePath || "/auth/me");
+        if (!currentUser || generation !== sessionGeneration || String(currentUser.id) !== String(userId)) return;
+        if (me.emailConfirmed === true) {
+          currentUser.emailConfirmed = true;
+          if (getRoute() === routes.profile) renderProfile();
+          if (getRoute() === routes.upload) renderUpload();
+        }
+      } catch (_) { /* Keep the prompt available while offline. */ }
+    })();
+    verificationRefresh = pending;
+    try { await pending; } finally { if (verificationRefresh === pending) verificationRefresh = null; }
+  }
+
+  function renderConfirmEmail() {
+    const secret = getHashQueryParam("token");
+    const valid = /^[A-Za-z0-9_-]{43}$/.test(secret || "");
+    app.innerHTML = `<section class="auth-page" aria-labelledby="confirmEmailTitle"><div class="auth-content"><header class="auth-heading"><h1 id="confirmEmailTitle">${valid ? "Confirm your email." : "Get a new link."}</h1><p>${valid ? "One tap to unlock uploads." : "Request another link from your profile."}</p></header>${valid ? '<button id="confirmEmailButton" class="primary-button auth-submit" type="button">Confirm email</button>' : `<a class="primary-button auth-submit" href="${currentUser ? routes.profile : routes.login}">${currentUser ? "Go to profile" : "Log in"}</a>`}${renderStatus(null, "confirmEmailStatus")}${authFooterMarkup()}</div></section>`;
+    focusPageHeading();
+    const button = document.getElementById("confirmEmailButton");
+    if (!button) return;
+    const content = app.querySelector(".auth-content");
+    button.addEventListener("click", async () => {
+      if (button.disabled) return;
+      button.disabled = true; button.textContent = "Confirming…";
+      setStatusMessage("confirmEmailStatus", null);
+      try {
+        await requestJson("/auth/email/confirm", { method: "POST", auth: false, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: secret }) });
+        await refreshEmailConfirmation();
+        if (!content.isConnected) return;
+        window.history.replaceState(null, "", window.location.pathname + window.location.search + routes.confirmEmail);
+        content.innerHTML = `<header class="auth-heading"><h1 id="confirmEmailTitle">Email confirmed.</h1></header><a class="primary-button auth-submit" href="${currentUser ? routes.upload : routes.login}">${currentUser ? "Continue" : "Log in"}</a>${authFooterMarkup()}`;
+        focusPageHeading();
+      } catch (error) {
+        if (!content.isConnected) return;
+        if (error.status === 400) {
+          content.innerHTML = `<header class="auth-heading"><h1 id="confirmEmailTitle">Get a new link.</h1><p>This link has expired or was already used.</p></header><a class="primary-button auth-submit" href="${currentUser ? routes.profile : routes.login}">${currentUser ? "Go to profile" : "Log in"}</a>${authFooterMarkup()}`;
+          window.history.replaceState(null, "", window.location.pathname + window.location.search + routes.confirmEmail);
+        } else {
+          setStatusMessage("confirmEmailStatus", { type: "error", message: error.status === 429 ? "Too many attempts. Try again later." : "Couldn’t confirm. Try again." });
+          button.disabled = false; button.textContent = "Confirm email";
+        }
+      }
+    });
+  }
+
   async function renderResetPassword() {
     const incomingToken = getHashQueryParam("token");
     if (incomingToken) {
@@ -2726,6 +2815,11 @@
   }
 
   function renderUpload(options) {
+    if (!currentUser || currentUser.emailConfirmed !== true) {
+      app.innerHTML = `<section class="page-wrap upload-page"><header class="upload-heading"><h1>Upload</h1></header>${verificationPrompt()}</section>`;
+      bindVerificationPrompt();
+      return;
+    }
     const renderOptions = options || {};
     const savedScrollY = renderOptions.preserveScroll ? window.scrollY : null;
     const count = uploadState.items.length;
@@ -3026,7 +3120,7 @@
 
   async function handleUploadSubmit(event) {
     event.preventDefault();
-    if (uploadState.isUploading || !currentUser) {
+    if (uploadState.isUploading || !currentUser || currentUser.emailConfirmed !== true) {
       return;
     }
 
@@ -4039,7 +4133,8 @@
       if (preview) URL.revokeObjectURL(preview);
       dialog.close();
       dialog.remove();
-      const editButton = document.getElementById("editProfile");
+      bindVerificationPrompt();
+    const editButton = document.getElementById("editProfile");
       if (editButton) editButton.focus();
     };
     dialog.querySelector(".clip-viewer-close").addEventListener("click", function () { if (!busy) dialog.dismiss(); });
@@ -4274,6 +4369,7 @@
               : `<button id="followProfile" class="${state.following ? "secondary-button" : "primary-button"} follow-button" type="button" aria-pressed="${state.following}" ${!state.loaded || !state.followStateKnown || state.followPending || state.blockPending ? "disabled" : ""}>${profileIcon(state.following ? "following" : "follow")}<span>${state.following ? "Following" : "Follow"}</span></button><button id="shareProfile" class="secondary-button" type="button">${profileIcon("share")}<span>Share</span></button><button id="reportProfile" class="profile-report-button" type="button" aria-label="Report account" title="Report account">${profileIcon("report")}</button>`}
           </div>
         </div>
+        ${isOwnProfile && currentUser.emailConfirmed !== true ? verificationPrompt() : ""}
         <section class="profile-section" aria-labelledby="profileClipsTitle">
           <div class="profile-section-head">
             <nav class="profile-tabs" aria-label="Profile clips">
@@ -4295,6 +4391,7 @@
       });
     }
 
+    bindVerificationPrompt();
     const editButton = document.getElementById("editProfile");
     if (editButton) editButton.addEventListener("click", openProfileEditor);
     const shareButton = document.getElementById("shareProfile");
@@ -4701,6 +4798,7 @@
     }
 
     if (route !== routes.resetPassword) passwordResetSecret = "";
+    if ([routes.profile, routes.upload].includes(route)) window.queueMicrotask(refreshEmailConfirmation);
     activeRoute = route;
     syncShell(route);
 
@@ -4710,6 +4808,9 @@
         break;
       case routes.forgotPassword:
         renderForgotPassword();
+        break;
+      case routes.confirmEmail:
+        renderConfirmEmail();
         break;
       case routes.resetPassword:
         renderResetPassword();
@@ -4805,7 +4906,9 @@
     // Ignore that stale navigation instead of rebuilding an in-progress form.
     if (!event.newURL || new URL(event.newURL).hash === window.location.hash) render();
   });
+  window.addEventListener("focus", refreshEmailConfirmation);
   document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) refreshEmailConfirmation();
     if (feedPool) feedPool.suspend(document.hidden);
     if (clipViewerState && clipViewerState.pool) clipViewerState.pool.suspend(document.hidden);
     if (clipViewerState && document.hidden) clipViewerState.overlay.querySelector("[data-clip-viewer-video]").pause();

@@ -37,7 +37,7 @@ const { execFileSync } = require("node:child_process");
     await page.route("https://dev-backend-withered-thunder-4589.fly.dev/**", async route => {
       const req = route.request(), url = new URL(req.url());
       let status = 200, body = [];
-      if (url.pathname === "/auth/me") body = { id: 1, username: "dave" };
+      if (url.pathname === "/auth/me") body = { id: 1, username: "dave", emailConfirmed: true };
       else if (url.pathname === "/iosclips" && req.method() === "POST") {
         const payload = req.postDataBuffer().toString("utf8");
         const field = name => { const match = payload.match(new RegExp('name="' + name + '"\\r\\n\\r\\n([^\\r]*)')); return match && match[1]; };
@@ -200,7 +200,7 @@ const { execFileSync } = require("node:child_process");
     await select(videoFile);
     const revoked = await page.evaluate(() => window.revokedPreviews.length);
     await page.locator("#logoutButton").click();
-    await page.getByRole("heading", { name: "Log in to Voxxly", exact: true }).waitFor();
+    await page.locator("#loginTitle").waitFor();
     assert.ok(await page.evaluate(count => window.revokedPreviews.length > count, revoked));
     assert.deepEqual(errors, []);
     console.log("Upload checks passed: responsive flat screens, real picker/preview, details and draft retention, file validation, multipart fields, progress, duplicate-submit guard, batch retry, permission/processing errors, completion, and preview cleanup.");

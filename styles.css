@@ -2664,3 +2664,8 @@ html.clip-viewer-open body {
 .inbox-reply .primary-button { background:var(--orange); box-shadow:none; }
 .inbox-reply button { justify-self:end; }
 @media(max-width:480px) { .inbox-heading { gap:8px; } .inbox-heading button,.inbox-heading a { padding:10px 12px; } .inbox-row time { max-width:85px; text-align:right; } }
+
+.email-verification { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:20px 6px; }
+.email-verification p { margin:0; color:var(--muted-strong); font-size:.9rem; }
+.email-verification button { flex-shrink:0; background:none; box-shadow:none; padding:10px 16px; font-size:.85rem; }
+#confirmEmailStatus { margin-top:18px; }

@@ -1021,7 +1021,7 @@
   }
 
   function renderReportButton(clipId) {
-    return `<button class="video-report-action" type="button" data-report-clip="${escapeHtml(clipId)}" aria-label="Report video" title="Report video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V3m0 1c5-4 9 4 14 0v10c-5 4-9-4-14 0"/></svg></button>`;
+    return `<button class="social-action video-report-action" type="button" data-report-clip="${escapeHtml(clipId)}" aria-label="Report video" title="Report video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V3m0 1c5-4 9 4 14 0v10c-5 4-9-4-14 0"/></svg><span>Report</span></button>`;
   }
 
   function closeVideoReport() {
@@ -1154,7 +1154,6 @@
             <svg viewBox="0 0 24 24"><path d="m6.5 5 11 7-11 7V5Z"></path></svg>
           </span>
           ${renderVideoVolumeControl(item.name)}
-          ${renderReportButton(item.id)}
           <button class="feed-audio-prompt hidden" type="button" data-feed-audio-prompt>Tap for sound</button>
           ${item.isMature || item.mature
             ? `<div class="soundbite-labels"><span class="badge badge-warning">Mature${item.minimumAge ? ` · ${escapeHtml(item.minimumAge)}+` : ""}</span></div>`
@@ -1174,6 +1173,7 @@
           ${renderLikeButton(item.id)}
           ${renderSocialButton("save", item.id)}
           ${renderSocialButton("repost", item.id)}
+          ${renderReportButton(item.id)}
         </aside>
       </article>
     `;

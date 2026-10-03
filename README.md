@@ -40,7 +40,7 @@ Update `config.js` when the API origin or contract changes. The current client u
 - `GET /ios/users/{userId}/followers` — load followers
 - `GET /ios/users/{userId}/following` — load followed profiles
 
-The current backend only authorizes accounts with administrator access to upload clips. New accounts are regular accounts, so they can use Soundbites and Profile immediately but will receive a clear administrator-access message if they attempt an upload. Changing that authorization policy requires a separate backend change.
+Every active signed-in account can upload clips. Regular accounts upload to their own profile; administrators retain managed upload access. Single clips, batch clips, and raw video uploads share this policy.
 
 Before production, the backend should also return a public user-summary DTO for search/profile requests and enforce the authenticated user on save, repost, and follow mutations. The web UI only renders `id`, `username`, and `profilePhotoUrl`, but the current raw user responses contain additional account fields and the social controllers presently trust IDs supplied by the client.
 

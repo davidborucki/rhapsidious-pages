@@ -2949,10 +2949,6 @@
     item.progress = 96;
   }
 
-  function uploadPermissionMessage() {
-    return "This account doesn’t have upload access.";
-  }
-
   async function handleUploadSubmit(event) {
     event.preventDefault();
     if (uploadState.isUploading || !currentUser) {
@@ -3038,18 +3034,18 @@
         failed += 1;
         item.status = {
           type: "error",
-          message: error.status === 403 ? "Upload access required" : (error.message || "Upload failed")
+          message: error.message || "Upload failed"
         };
         item.progress = item.progress || 0;
 
         if (error.status === 403) {
           permissionDenied = true;
           pendingItems.slice(index + 1).forEach(function (remaining) {
-            remaining.status = { type: "error", message: "Upload access required" };
+            remaining.status = { type: "error", message: "Not uploaded" };
             remaining.progress = 0;
           });
           failed += pendingItems.length - index - 1;
-          state.summary = { type: "error", message: uploadPermissionMessage() };
+          state.summary = { type: "error", message: error.message || "Upload couldn’t be completed. Try again." };
           break;
         }
       }

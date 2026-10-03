@@ -53,6 +53,13 @@
       terms: '<path d="M14 2H5v20h14V7zM14 2v5h5M8 12h8M8 16h8"/>'
     };
     const icon = id => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[id]}</svg>`;
+    const externalSections = {
+      support: { path: "./support/", key: "supportUrl" },
+      privacy: { path: "./privacy-policy/", key: "privacyPolicyUrl" },
+      terms: { path: "./terms-of-service/", key: "termsOfServiceUrl" }
+    };
+    const externalUrl = id => legalUrl(links && links[externalSections[id].key])
+      || new URL(externalSections[id].path, window.location.href).href;
     const groups = [
       ["Your account", ["account"]],
       ["Privacy and content", ["blocked", "content"]],
@@ -69,7 +76,10 @@
           <nav class="settings-menu" aria-label="Settings sections">
             ${groups.map(([heading, ids]) => `<section class="settings-group"><h2>${heading}</h2>${ids.map(id => {
               const title = sections.find(item => item[0] === id)[1];
-              return `<a class="settings-row" data-section="${id}" href="#/settings?section=${id}">${icon(id)}<span>${title}</span><svg class="settings-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a>`;
+              const destination = externalSections[id]
+                ? `href="${escape(externalUrl(id))}" target="_blank" rel="noopener noreferrer"`
+                : `href="#/settings?section=${id}"`;
+              return `<a class="settings-row" data-section="${id}" ${destination}>${icon(id)}<span>${title}</span><svg class="settings-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a>`;
             }).join("")}</section>`).join("")}
           </nav>
           <p class="settings-empty" role="status" hidden>No settings found.</p>
@@ -173,7 +183,15 @@
       render();
       try { const result = await request("/app/config"); if (active) links = result; }
       catch (_) { if (active) linksError = "Couldn’t load the document link. Please try again."; }
-      finally { loadingLinks = false; if (active && ["privacy", "terms"].includes(selected)) render(); }
+      finally {
+        loadingLinks = false;
+        if (active) {
+          Object.keys(externalSections).forEach(id => {
+            host.querySelector(`[data-section="${id}"]`).href = externalUrl(id);
+          });
+          if (["privacy", "terms"].includes(selected)) render();
+        }
+      }
     }
     function bindDetail() {
       const deleteButton = detail.querySelector("[data-delete-account]");
@@ -268,6 +286,7 @@
       if (["privacy", "terms"].includes(selected) && !links && !linksError) loadLinks();
     }
     updateRoute(false);
+    loadLinks();
     const cleanup = function () { active = false; };
     cleanup.updateRoute = updateRoute;
     return cleanup;

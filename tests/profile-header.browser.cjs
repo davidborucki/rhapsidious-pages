@@ -34,14 +34,15 @@ const http = require("node:http");
     }, { isWebkit });
     const failures = [], requests = [];
     page.on("pageerror", error => failures.push(error.message));
-    let following = false, blocked = false, reportStatus = 201, failFollow = false;
+    let following = false, blocked = false, reportStatus = 201, failFollow = false, showCollections = false;
     const user = id => ({ id, username: id === 1 ? "dave" : "itskaitlyngilbride", profilePhotoUrl: origin + "/assets/voxxly-logo-192.png" });
     await page.route("https://dev-backend-withered-thunder-4589.fly.dev/**", async route => {
       const req = route.request(), url = new URL(req.url());
       const bodyIn = req.postData() ? JSON.parse(req.postData()) : null;
       requests.push({ path: url.pathname, method: req.method(), body: bodyIn });
       let body = [], status = 200;
-      if (url.pathname === "/auth/me") body = user(1);
+      if (showCollections && /\/(reposted-clips|saved-clips)$/.test(url.pathname)) body = [{ id: 30, iosUserId: 2, name: "A test video", creator: user(2) }];
+      else if (url.pathname === "/auth/me") body = user(1);
       else if (/^\/ios\/users\/[12]$/.test(url.pathname)) body = user(Number(url.pathname.split("/").pop()));
       else if (url.pathname.endsWith("/follow-counts")) body = { followerCount: 5300, followingCount: 241 };
       else if (url.pathname.includes("/follows/")) body = { following };
@@ -56,10 +57,16 @@ const http = require("node:http");
     });
     const visit = async id => {
       await page.goto(origin + `/#/profile?userId=${id}`);
-      await page.locator(".profile-stats strong").first().filter({ hasText: "241" }).waitFor();
+      await page.locator(".profile-stats strong").filter({ hasText: "241" }).waitFor();
     };
     for (const id of [1, 2]) {
       await visit(id);
+      assert.deepEqual(await page.locator(".profile-stat span").allTextContents(), ["Posts", "Followers", "Following"]);
+      assert.equal((await page.locator(".empty-state").textContent()).trim(), "No posts yet");
+      await page.getByRole("link", { name: "Reposts 0", exact: true }).click();
+      await page.getByRole("heading", { name: "No reposts yet", exact: true }).waitFor();
+      assert.equal((await page.locator(".empty-state").textContent()).trim(), "No reposts yet");
+      await page.getByRole("link", { name: "Posts 0", exact: true }).click();
       assert.deepEqual(await page.locator(".profile-actions > *").allTextContents(), id === 1 ? ["Edit profile", "Settings"] : ["Follow", "Share"]);
       assert.equal(await page.locator("#reportProfile").count(), id === 1 ? 0 : 1);
       for (const width of [320, 390, 768, 1440]) {
@@ -144,7 +151,14 @@ const http = require("node:http");
     await page.getByText("User blocked", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Unblock", exact: true }).click();
     await page.getByRole("button", { name: "Follow", exact: true }).waitFor();
+    showCollections = true;
+    for (const route of ["/#/profile?userId=1&tab=reposts", "/#/saved"]) {
+      await page.goto(origin + route);
+      await page.getByRole("heading", { name: "A test video", exact: true }).waitFor();
+      assert.equal(await page.locator(".clip-creator-link").count(), 0);
+      assert.deepEqual(await page.locator(".profile-clip-copy").allTextContents().then(items => items.map(text => text.trim())), ["A test video"]);
+    }
     assert.deepEqual(failures, []);
-    console.log("Profile header checks passed: responsive avatar-first layout, flat colors, own/other actions, follow/unfollow and rollback, clipboard and temporary toast, account reports/cancel/retry, block/unblock.");
+    console.log("Profile header checks passed: responsive avatar-first layout, stats order, minimal empty states, title-only saved/reposted cards, flat colors, own/other actions, follow/unfollow and rollback, clipboard and temporary toast, account reports/cancel/retry, block/unblock.");
   } finally { if (browser) await browser.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

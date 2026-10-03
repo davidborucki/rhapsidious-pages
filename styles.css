@@ -2663,7 +2663,9 @@ html.clip-viewer-open body {
 .settings-group:first-child { border-top: 0; padding-top: 0; }
 .settings-group h2 { margin: 0 0 12px; color: #a6afb7; font-size: .85rem; font-weight: 600; }
 .settings-row { display: flex; align-items: center; gap: 16px; min-height: 64px; padding: 14px 8px; border-radius: 8px; color: var(--text); text-decoration: none; }
-.settings-row:hover { background: rgba(255,255,255,.045); text-decoration: none; }
+@media (hover: hover) and (pointer: fine) {
+  .settings-row:hover { background: rgba(255,255,255,.045); text-decoration: none; }
+}
 .settings-row:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
 .settings-row > svg { width: 24px; height: 24px; flex-shrink: 0; }
 .settings-row > span { flex: 1; }

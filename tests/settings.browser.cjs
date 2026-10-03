@@ -1,13 +1,14 @@
 // Run with Playwright available and the static site served on localhost:8765.
-const { chromium } = require("playwright");
+const { chromium, webkit, devices } = require("playwright");
 const assert = require("node:assert/strict");
 (async () => {
-  const browser = await chromium.launch({ headless: true, executablePath: process.env.SETTINGS_BROWSER_PATH || undefined });
+  const isWebkit = process.env.BROWSER_ENGINE === "webkit";
+  const origin = process.env.TEST_BASE_URL || "http://127.0.0.1:8765";
+  const browser = await (isWebkit ? webkit : chromium).launch({ headless: true, executablePath: process.env.SETTINGS_BROWSER_PATH || undefined });
   try {
-    const page = await browser.newPage();
+    const page = await browser.newPage(isWebkit ? devices["iPhone 13"] : { viewport: { width: 390, height: 844 }, hasTouch: true });
     const requests = [];
     let failUnblock = true;
-    let failSupport = true;
     let failDeletion = true;
     let releaseDeletion;
     await page.route("https://dev-backend-withered-thunder-4589.fly.dev/**", async route => {
@@ -19,7 +20,6 @@ const assert = require("node:assert/strict");
       if (path === "/auth/me") body = { id: 1, username: "dave", email: "dave@example.com" };
       if (path === "/me/blocked-users") body = [{ id: 2, username: "blocked_person" }];
       if (path === "/users/2/block" && failUnblock) status = 500;
-      if (path === "/support/tickets" && failSupport) status = 500;
       if (path === "/me/account") {
         if (failDeletion) status = 500;
         else {
@@ -27,11 +27,11 @@ const assert = require("node:assert/strict");
           body = { status: "ok", accountDeleted: true };
         }
       }
-      if (path === "/app/config") body = { privacyPolicyUrl: "https://example.com/privacy", termsOfServiceUrl: "https://example.com/terms" };
+      if (path === "/app/config") body = { privacyPolicyUrl: origin + "/privacy-policy/", termsOfServiceUrl: origin + "/terms-of-service/", supportUrl: origin + "/support/" };
       await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     });
     await page.addInitScript(() => localStorage.setItem("voxxly_web_access_token", "test-token"));
-    await page.goto("http://127.0.0.1:8765/#/settings");
+    await page.goto(origin + "/#/settings");
     await page.getByRole("heading", { name: "Settings", exact: true }).waitFor();
     assert.equal(await page.locator("[data-section]").count(), 6);
     assert.equal(await page.locator(".settings-detail").isVisible(), false);
@@ -52,6 +52,7 @@ const assert = require("node:assert/strict");
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     assert.ok(!requests.some(req => req.path === "/me/account"));
     await page.getByRole("link", { name: "Back to settings", exact: true }).click();
+    await page.locator(".settings-home").waitFor({ state: "visible" });
     for (const width of [390, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       const layout = await page.evaluate(() => ({
@@ -76,24 +77,27 @@ const assert = require("node:assert/strict");
     failUnblock = false;
     await page.getByRole("button", { name: "Unblock blocked_person" }).click();
     await page.getByRole("heading", { name: "No blocked users" }).waitFor();
-    await openSection("Contact support");
-    assert.equal(await page.locator("#sendSupport").isDisabled(), true);
-    await page.locator("#supportMessage").fill("The clip audio stopped.");
-    await openSection("Privacy policy");
-    await page.getByRole("link", { name: /Open privacy policy/ }).waitFor();
-    assert.equal(await page.getByRole("link", { name: /Open privacy policy/ }).getAttribute("href"), "https://example.com/privacy");
-    await page.goBack();
-    await page.getByRole("heading", { name: "Settings", exact: true }).waitFor();
-    await page.goBack();
-    await page.getByRole("heading", { name: "Contact support", exact: true }).waitFor();
-    assert.equal(await page.locator("#supportMessage").inputValue(), "The clip audio stopped.");
-    await page.locator("#sendSupport").click();
-    await page.getByText(/We couldn’t confirm delivery/).waitFor();
-    assert.equal(await page.locator("#supportMessage").inputValue(), "The clip audio stopped.");
-    failSupport = false;
-    await page.locator("#sendSupport").click();
-    await page.getByRole("heading", { name: "Message sent" }).waitFor();
-    assert.equal(requests.filter(req => req.path === "/support/tickets").length, 2);
+    await page.getByRole("link", { name: "Back to settings", exact: true }).click();
+    await page.locator(".settings-home").waitFor({ state: "visible" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    // A touch-style hover must not leave Manage account looking selected.
+    if (isWebkit) {
+      await page.locator('[data-section="account"]').hover();
+      assert.equal(await page.locator('[data-section="account"]').evaluate(el => getComputedStyle(el).backgroundColor),
+        await page.locator('[data-section="blocked"]').evaluate(el => getComputedStyle(el).backgroundColor));
+    }
+    for (const [name, destination, heading] of [["Contact support", "/support/", "Support"], ["Privacy policy", "/privacy-policy/", "Privacy Policy"], ["Terms of service", "/terms-of-service/", "Terms of Service"]]) {
+      const link = page.getByRole("link", { name, exact: true });
+      assert.equal(await link.getAttribute("target"), "_blank");
+      const [popup] = await Promise.all([page.waitForEvent("popup"), link.click()]);
+      await popup.waitForLoadState();
+      assert.equal(new URL(popup.url()).pathname, destination);
+      await popup.getByRole("heading", { name: heading, exact: true, level: 1 }).waitFor();
+      assert.equal(await popup.evaluate(() => window.opener), null);
+      assert.equal(new URL(page.url()).hash, "#/settings");
+      assert.equal(await page.locator(".settings-home").isVisible(), true);
+      await popup.close();
+    }
     assert.ok(!requests.some(req => /deactiv|\/account$/.test(req.path)));
     await openSection("Manage account");
     await page.getByRole("button", { name: "Delete account", exact: true }).click();
@@ -113,6 +117,6 @@ const assert = require("node:assert/strict");
     await page.getByText("Your account has been deleted.", { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => localStorage.getItem("voxxly_web_access_token")), null);
     assert.ok(requests.filter(req => req.path === "/me/account").every(req => req.method === "DELETE" && req.data === null));
-    console.log("Settings browser checks passed: list/detail navigation, search, browser Back, responsive layouts, existing settings, deletion cancellation, failure/retry, duplicate clicks and sign-out after navigation.");
+    console.log("Settings browser checks passed: direct new-tab support/legal links, list/detail navigation, search, responsive layouts, consistent touch row styling, deletion cancellation, failure/retry, duplicate clicks and sign-out after navigation.");
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

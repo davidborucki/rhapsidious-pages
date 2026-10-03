@@ -3485,13 +3485,10 @@
   }
 
   function renderSavedClip(clip) {
-    const creator = embeddedCreator(clip) || creatorCache.get(String(clip.iosUserId)) || null;
-    const creatorName = (creator && creator.username) || clip.creatorName || "Voxxly creator";
     return `
       <article class="profile-clip saved-clip">
         ${renderClipThumbnail(clip)}
         <div class="profile-clip-copy">
-          <a class="clip-creator-link" href="${escapeHtml(getProfileRoute(clip.iosUserId))}">@${escapeHtml(creatorName)}</a>
           <h3 title="${escapeHtml(clip.name || "Untitled soundbite")}">${escapeHtml(clip.name || "Untitled soundbite")}</h3>
         </div>
       </article>
@@ -3811,15 +3808,11 @@
     }
   }
 
-  function renderProfileClip(clip, options) {
-    const renderOptions = options || {};
-    const creator = creatorCache.get(String(clip.iosUserId)) || null;
-    const creatorName = (creator && creator.username) || clip.creatorName || "Voxxly creator";
+  function renderProfileClip(clip) {
     return `
       <article class="profile-clip">
         ${renderClipThumbnail(clip)}
         <div class="profile-clip-copy">
-          ${renderOptions.showCreator ? `<a class="clip-creator-link" href="${escapeHtml(getProfileRoute(clip.iosUserId))}">@${escapeHtml(creatorName)}</a>` : ""}
           <h3 title="${escapeHtml(clip.name || "Untitled soundbite")}">${escapeHtml(clip.name || "Untitled soundbite")}</h3>
         </div>
       </article>
@@ -4119,18 +4112,14 @@
       `;
     } else if (activeCollection.length) {
       clipsMarkup = `<div class="clip-grid-shell"><div class="clip-grid">${activeCollection.map(function (clip) {
-        return renderProfileClip(clip, { showCreator: state.activeTab === "reposts" });
+        return renderProfileClip(clip);
       }).join("")}</div></div>`;
     } else {
-      const emptyTitle = state.activeTab === "reposts" ? "No reposts yet." : "No posts yet.";
-      const emptyCopy = state.activeTab === "reposts"
-        ? `${isOwnProfile ? "Clips you repost" : "Clips reposted by this user"} will appear here.`
-        : (isOwnProfile ? "Your uploaded clips will appear here." : "This user has not posted any clips yet.");
+      const emptyTitle = state.activeTab === "reposts" ? "No reposts yet" : "No posts yet";
       clipsMarkup = `
         <div class="panel empty-state">
           <div class="stack-tight">
             <h2>${escapeHtml(emptyTitle)}</h2>
-            <p class="muted">${escapeHtml(emptyCopy)}</p>
           </div>
         </div>
       `;
@@ -4147,9 +4136,9 @@
               <p class="profile-handle">@${escapeHtml(user.username || "creator")}</p>
             </div>
             <div class="profile-stats" aria-label="Profile statistics">
-              <a class="profile-stat" href="${routes.connections}?userId=${encodeURIComponent(targetUserId)}&type=following"><strong>${followingDisplay}</strong><span>Following</span></a>
-              <a class="profile-stat" href="${routes.connections}?userId=${encodeURIComponent(targetUserId)}&type=followers"><strong>${followerDisplay}</strong><span>Followers</span></a>
               <div class="profile-stat"><strong>${formatCount(clipCount)}</strong><span>Posts</span></div>
+              <a class="profile-stat" href="${routes.connections}?userId=${encodeURIComponent(targetUserId)}&type=followers"><strong>${followerDisplay}</strong><span>Followers</span></a>
+              <a class="profile-stat" href="${routes.connections}?userId=${encodeURIComponent(targetUserId)}&type=following"><strong>${followingDisplay}</strong><span>Following</span></a>
             </div>
           </div>
           <div class="profile-actions">

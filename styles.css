@@ -520,15 +520,14 @@ input:disabled {
   display: grid;
   place-items: center;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 50%;
   text-decoration: none;
-  transition: border-color 150ms ease, transform 150ms ease;
+  transition: transform 150ms ease;
 }
 
 .account-link:hover,
 .account-link[aria-current="page"] {
-  border-color: rgba(255, 158, 24, 0.68);
   transform: translateY(-1px);
 }
 

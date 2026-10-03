@@ -3735,12 +3735,8 @@
       content = `<div class="clip-grid-shell"><div class="clip-grid">${socialState.savedClips.map(renderSavedClip).join("")}</div></div>`;
     } else {
       content = `
-        <div class="panel empty-state">
-          <div class="stack-tight">
-            <h2>No saved clips yet.</h2>
-            <p class="muted">Save a Soundbite and it will appear here.</p>
-            <div class="actions" style="justify-content:center"><a class="primary-button" href="#/feed">Browse Soundbites</a></div>
-          </div>
+        <div class="empty-state">
+          <h2>No saved clips yet</h2>
         </div>
       `;
     }

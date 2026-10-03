@@ -922,7 +922,7 @@
   function renderConfirmEmail() {
     const secret = getHashQueryParam("token");
     const valid = /^[A-Za-z0-9_-]{43}$/.test(secret || "");
-    app.innerHTML = `<section class="auth-page" aria-labelledby="confirmEmailTitle"><div class="auth-content"><header class="auth-heading"><h1 id="confirmEmailTitle">${valid ? "Confirm your email." : "Get a new link."}</h1><p>${valid ? "One tap to unlock uploads." : "Request another link from your profile."}</p></header>${valid ? '<button id="confirmEmailButton" class="primary-button auth-submit" type="button">Confirm email</button>' : `<a class="primary-button auth-submit" href="${currentUser ? routes.profile : routes.login}">${currentUser ? "Go to profile" : "Log in"}</a>`}${renderStatus(null, "confirmEmailStatus")}${authFooterMarkup()}</div></section>`;
+    app.innerHTML = `<section class="auth-page" aria-labelledby="confirmEmailTitle"><div class="auth-content"><header class="auth-heading"><h1 id="confirmEmailTitle">${valid ? "Confirm your email." : "Get a new link."}</h1>${valid ? "" : "<p>Request another link from your profile.</p>"}</header>${valid ? '<button id="confirmEmailButton" class="primary-button auth-submit" type="button">Confirm email</button>' : `<a class="primary-button auth-submit" href="${currentUser ? routes.profile : routes.login}">${currentUser ? "Go to profile" : "Log in"}</a>`}${renderStatus(null, "confirmEmailStatus")}${authFooterMarkup()}</div></section>`;
     focusPageHeading();
     const button = document.getElementById("confirmEmailButton");
     if (!button) return;

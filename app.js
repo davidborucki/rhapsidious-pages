@@ -708,6 +708,7 @@
     socialState = createSocialState();
     searchState = createSearchState();
     connectionsState = createConnectionsState();
+    releaseUploadItems(uploadState.items);
     uploadState = {
       items: [],
       host: "",
@@ -2565,6 +2566,8 @@
     return {
       id: randomId("upload"),
       file: file,
+      previewUrl: URL.createObjectURL(file),
+      attempted: false,
       name: getDefaultClipName(file),
       status: { type: "info", message: "Ready" },
       progress: 0,
@@ -2599,93 +2602,152 @@
     });
 
     uploadState.summary = skipped
-      ? { type: "info", message: `${pluralize(skipped, "file")} skipped because it was duplicated, not a supported video, or over the size limit.` }
+      ? { type: "info", message: `${pluralize(skipped, "file")} skipped. Choose videos under ${uploadConfig.maxFileSizeMb || 100} MB; duplicates are ignored.` }
       : null;
     renderUpload();
+    document.getElementById("uploadTitle").focus({ preventScroll: true });
   }
 
-  function renderUploadItem(item, index) {
+  function uploadIcon(name) {
+    const paths = {
+      video: '<rect x="4" y="2" width="16" height="20" rx="3"/><path d="m10 9 5 3-5 3Z"/>',
+      play: '<path d="m9 5 11 7-11 7Z"/>',
+      pause: '<path d="M9 5v14m6-14v14"/>',
+      plus: '<path d="M12 5v14M5 12h14"/>',
+      close: '<path d="m6 6 12 12M18 6 6 18"/>',
+      check: '<path d="m5 12 4 4L19 6"/>',
+      chevron: '<path d="m9 5 7 7-7 7"/>'
+    };
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
+  }
+
+  function releaseUploadItems(items) {
+    items.forEach(item => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); });
+  }
+
+  function renderUploadItem(item) {
+    const busy = uploadState.isUploading;
+    const showProgress = busy || item.attempted || item.uploaded || item.status.type === "error";
+    const extension = (item.file.name.match(/\.([a-z0-9]{1,5})$/i) || [])[1];
+    const fileType = extension ? extension.toUpperCase() : "Video";
     return `
       <article class="upload-item" data-upload-item="${escapeHtml(item.id)}">
-        <div class="upload-item-head">
-          <div style="min-width:0">
-            <p class="file-name">${escapeHtml(item.file.name)}</p>
-            <p class="file-meta">${escapeHtml(formatFileSize(item.file.size))} · Clip ${index + 1}</p>
-          </div>
-          <button class="remove-button" type="button" data-remove-upload="${escapeHtml(item.id)}" aria-label="Remove ${escapeHtml(item.file.name)}" ${uploadState.isUploading ? "disabled" : ""}>×</button>
+        <button class="upload-preview" type="button" data-preview-upload aria-label="Preview ${escapeHtml(item.file.name)}" aria-pressed="false">
+          <video src="${escapeHtml(item.previewUrl)}" ${item.previewPoster ? `poster="${escapeHtml(item.previewPoster)}"` : ""} muted playsinline preload="metadata" aria-hidden="true"></video>
+          <span class="upload-preview-symbol">${uploadIcon("play")}</span>
+        </button>
+        <div class="upload-item-content">
+          ${busy || item.uploaded
+            ? `<h2 class="upload-item-title">${escapeHtml(item.name)}</h2>`
+            : `<div class="field"><label for="title-${escapeHtml(item.id)}">Title</label><input id="title-${escapeHtml(item.id)}" data-upload-title="${escapeHtml(item.id)}" type="text" value="${escapeHtml(item.name)}" maxlength="160" required /></div>`}
+          <p class="file-meta" title="${escapeHtml(item.file.name)}">${escapeHtml(fileType)} · ${escapeHtml(formatFileSize(item.file.size))}</p>
+          ${showProgress ? `<div class="progress-wrap" data-state="${escapeHtml(item.status.type)}" role="status" aria-label="Status for ${escapeHtml(item.file.name)}">
+            <div class="progress-label"><span>${escapeHtml(busy && !item.attempted && !item.uploaded && item.status.type !== "error" ? "Waiting" : item.status.message)}</span></div>
+            ${busy && item.status.type !== "error" && item.status.type !== "success" ? '<div class="upload-working-track" aria-hidden="true"><span></span></div>' : ""}
+          </div>` : ""}
         </div>
-        <div class="field">
-          <label for="title-${escapeHtml(item.id)}">Soundbite title</label>
-          <input id="title-${escapeHtml(item.id)}" data-upload-title="${escapeHtml(item.id)}" type="text" value="${escapeHtml(item.name)}" maxlength="160" required ${uploadState.isUploading || item.uploaded ? "disabled" : ""} />
-        </div>
-        <div class="progress-wrap" role="progressbar" aria-label="Upload progress for ${escapeHtml(item.file.name)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(item.progress || 0)}" aria-valuetext="${escapeHtml(item.status.message)}">
-          <div class="progress-track" aria-hidden="true"><div class="progress-value" style="width:${Math.min(100, Math.max(0, item.progress || 0))}%"></div></div>
-          <div class="progress-label"><span>${escapeHtml(item.status.message)}</span><span>${Math.round(item.progress || 0)}%</span></div>
-        </div>
-      </article>
-    `;
+        ${!busy && !item.uploaded ? `<button class="upload-remove" type="button" data-remove-upload="${escapeHtml(item.id)}" aria-label="Remove ${escapeHtml(item.file.name)}">${uploadIcon("close")}</button>` : ""}
+      </article>`;
   }
 
   function renderUpload(options) {
     const renderOptions = options || {};
     const savedScrollY = renderOptions.preserveScroll ? window.scrollY : null;
     const count = uploadState.items.length;
-    const readyCount = uploadState.items.filter(function (item) { return !item.uploaded; }).length;
+    const readyCount = uploadState.items.filter(item => !item.uploaded).length;
+    const finished = count > 0 && !readyCount && !uploadState.isUploading;
+    const processing = uploadState.isUploading && !readyCount;
+    const pendingProcessing = uploadState.items.some(item => item.uploaded && item.progress < 100);
+    const hasIssues = uploadState.items.some(item => item.status.type === "error");
+    const heading = finished ? "Uploaded" : processing ? "Finishing up" : uploadState.isUploading ? "Uploading" : "Upload";
+    const summary = uploadState.summary;
+    const showSummary = summary && summary.message && (summary.type === "error" || (!uploadState.isUploading && !finished));
 
     app.innerHTML = `
       <section class="page-wrap upload-page" aria-labelledby="uploadTitle">
-        <header class="page-header">
-          <h1 id="uploadTitle" class="page-title">Upload</h1>
+        <header class="upload-heading">
+          <h1 id="uploadTitle" tabindex="-1">${heading}</h1>
+          ${count && !finished ? `<span class="upload-count">${escapeHtml(pluralize(count, "video"))}</span>` : ""}
         </header>
-        <div class="upload-layout">
-          <aside class="panel upload-settings">
-            <div class="stack">
-              <div>
-                <h2 class="section-title">Clip details</h2>
-                <p class="section-copy">These details apply to every clip in this queue.</p>
+        <input id="clipFiles" class="hidden" type="file" accept="video/mp4,video/quicktime,video/x-m4v,video/webm,video/*" multiple ${uploadState.isUploading ? "disabled" : ""} />
+        ${!count ? `
+          <div id="uploadDropzone" class="upload-start">
+            <span class="upload-start-icon">${uploadIcon("video")}</span>
+            <h2>Start with a video</h2>
+            <p class="upload-file-help" id="uploadFileHelp">MP4, MOV, M4V, WebM · ${escapeHtml(uploadConfig.maxFileSizeMb || 100)} MB each</p>
+            <button class="primary-button upload-choose" type="button" data-choose-upload aria-describedby="uploadFileHelp">Choose videos</button>
+            <p class="upload-drop-hint">or drop them here</p>
+          </div>` : `
+          ${finished ? `<div class="upload-complete" role="status"><span>${uploadIcon("check")}</span><p>${hasIssues ? "Uploaded. Some videos still need processing." : pendingProcessing ? "Your videos are still processing." : count === 1 ? "Your soundbite is ready." : "Your soundbites are ready."}</p></div>` : ""}
+          ${showSummary ? `<p id="uploadSummary" class="upload-message${summary.type === "error" ? " is-error" : ""}" role="${summary.type === "error" ? "alert" : "status"}">${escapeHtml(summary.message)}</p>` : ""}
+          <form id="uploadForm">
+            <div ${!finished ? 'id="uploadDropzone"' : ""} class="upload-list${finished ? " is-complete" : ""}">${uploadState.items.map(renderUploadItem).join("")}</div>
+            ${!uploadState.isUploading && readyCount ? `
+              <div class="upload-list-tools">
+                <button class="upload-text-button" type="button" data-choose-upload>${uploadIcon("plus")}Add videos</button>
+                ${count > 1 ? '<button id="clearUploadQueue" class="upload-text-button" type="button">Clear</button>' : ""}
               </div>
-              <div class="creator-access-note">Uploading is currently limited by the backend to accounts with administrator upload access. Every signed-in account can still use Soundbites and Profile.</div>
-              <div class="field">
-                <label for="uploadHost">Host</label>
-                <input id="uploadHost" type="text" value="${escapeHtml(uploadState.host || (currentUser && currentUser.username) || "")}" placeholder="Host name" ${uploadState.isUploading ? "disabled" : ""} />
-              </div>
-              <div class="field">
-                <label for="uploadGuests">Guests <span class="muted">(optional)</span></label>
-                <input id="uploadGuests" type="text" value="${escapeHtml(uploadState.guestCsv)}" placeholder="guest-one, guest-two" ${uploadState.isUploading ? "disabled" : ""} />
-              </div>
-              <input id="clipFiles" class="hidden" type="file" accept="video/mp4,video/quicktime,video/x-m4v,video/webm,video/*" multiple ${uploadState.isUploading ? "disabled" : ""} />
-              <label id="uploadDropzone" class="upload-dropzone" for="clipFiles" tabindex="0" role="button" aria-describedby="uploadFileHelp">
-                <span>
-                  <span class="upload-glyph" aria-hidden="true">＋</span>
-                  <span class="dropzone-title">Drop clips here or browse</span>
-                  <span id="uploadFileHelp" class="dropzone-copy">MP4, MOV, M4V, or WebM · up to ${escapeHtml(uploadConfig.maxFileSizeMb || 100)} MB each</span>
-                </span>
-              </label>
-            </div>
-          </aside>
-          <section class="panel upload-queue-panel" aria-labelledby="queueTitle">
-            <div class="stack">
-              <div class="queue-toolbar">
-                <div>
-                  <h2 id="queueTitle" class="section-title">Upload queue</h2>
-                  <p class="queue-count">${count ? escapeHtml(pluralize(count, "clip")) : "No clips selected"}</p>
+              <details class="upload-details" ${uploadState.detailsOpen ? "open" : ""}>
+                <summary>Host &amp; guests ${uploadIcon("chevron")}</summary>
+                <div class="upload-details-fields">
+                  <div class="field"><label for="uploadHost">Host</label><input id="uploadHost" type="text" value="${escapeHtml(uploadState.host || (currentUser && currentUser.username) || "")}" placeholder="Host name" /></div>
+                  <div class="field"><label for="uploadGuests">Guests <span class="muted">(optional)</span></label><input id="uploadGuests" type="text" value="${escapeHtml(uploadState.guestCsv)}" placeholder="Names, separated by commas" /></div>
                 </div>
-                ${count ? `<button id="clearUploadQueue" class="quiet-button" type="button" ${uploadState.isUploading ? "disabled" : ""}>Clear</button>` : ""}
-              </div>
-              ${renderStatus(uploadState.summary, "uploadSummary")}
-              ${count
-                ? `<form id="uploadForm" class="stack"><div class="upload-list">${uploadState.items.map(renderUploadItem).join("")}</div><button id="uploadSubmit" class="primary-button" type="submit" ${uploadState.isUploading || !readyCount ? "disabled" : ""}>${uploadState.isUploading ? "Uploading queue…" : `Upload ${escapeHtml(pluralize(readyCount, "clip"))}`}</button></form>`
-                : `<div class="empty-state"><div><p class="section-title">Your queue is ready when you are.</p><p class="section-copy">Select one video for a single upload or several videos for a batch.</p></div></div>`}
-            </div>
-          </section>
-        </div>
-      </section>
-    `;
+              </details>
+              <div class="upload-footer"><button id="uploadSubmit" class="primary-button" type="submit">${hasIssues ? "Retry upload" : readyCount === 1 ? "Upload video" : `Upload ${readyCount} videos`}</button></div>` : ""}
+            ${uploadState.isUploading ? '<p class="upload-stay">Keep this tab open until the upload finishes.</p>' : ""}
+          </form>
+          ${finished ? `<div class="upload-footer upload-finished-actions"><a class="primary-button" href="${escapeHtml(getProfileRoute(currentUser.id))}">View profile</a><button id="clearUploadQueue" class="upload-text-button" type="button">Upload more</button></div>` : ""}`}
+        ${!count && showSummary ? `<p id="uploadSummary" class="upload-message" role="status">${escapeHtml(summary.message)}</p>` : ""}
+      </section>`;
 
     const fileInput = document.getElementById("clipFiles");
     const dropzone = document.getElementById("uploadDropzone");
     const hostInput = document.getElementById("uploadHost");
     const guestsInput = document.getElementById("uploadGuests");
+    app.querySelectorAll("[data-choose-upload]").forEach(button => {
+      button.addEventListener("click", () => { if (fileInput && !fileInput.disabled) fileInput.click(); });
+    });
+    const details = app.querySelector(".upload-details");
+    if (details) details.addEventListener("toggle", () => { uploadState.detailsOpen = details.open; });
+    app.querySelectorAll("[data-preview-upload]").forEach(button => {
+      const video = button.querySelector("video");
+      const item = uploadState.items.find(candidate => candidate.id === button.closest("[data-upload-item]").dataset.uploadItem);
+      const rememberPoster = () => {
+        if (!item || item.previewPoster || video.readyState < 2 || video.seeking || !video.videoWidth) return;
+        try {
+          const canvas = document.createElement("canvas");
+          const scale = Math.min(240 / video.videoWidth, 360 / video.videoHeight);
+          canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+          canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+          canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+          item.previewPoster = canvas.toDataURL("image/jpeg", 0.8);
+          video.poster = item.previewPoster;
+        } catch (_) { /* A preview is optional; the original file can still upload. */ }
+      };
+      video.addEventListener("loadedmetadata", () => { if (video.duration > 0.1) video.currentTime = 0.1; });
+      video.addEventListener("loadeddata", rememberPoster);
+      video.addEventListener("seeked", rememberPoster);
+      video.addEventListener("error", () => {
+        button.classList.add("is-unavailable");
+        button.disabled = true;
+        button.setAttribute("aria-label", "Video preview unavailable");
+        button.querySelector(".upload-preview-symbol").innerHTML = uploadIcon("video");
+      });
+      const update = () => {
+        button.setAttribute("aria-pressed", String(!video.paused));
+        button.querySelector(".upload-preview-symbol").innerHTML = uploadIcon(video.paused ? "play" : "pause");
+      };
+      video.addEventListener("play", update);
+      video.addEventListener("pause", update);
+      video.addEventListener("ended", update);
+      button.addEventListener("click", () => {
+        if (!video.paused) { video.pause(); return; }
+        app.querySelectorAll(".upload-preview video").forEach(other => { if (other !== video) other.pause(); });
+        video.muted = false;
+        video.play().catch(update);
+      });
+    });
 
     if (fileInput) {
       fileInput.addEventListener("change", function (event) {
@@ -2703,16 +2765,9 @@
       });
     }
     if (dropzone) {
-      dropzone.addEventListener("keydown", function (event) {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          if (fileInput && !fileInput.disabled) {
-            fileInput.click();
-          }
-        }
-      });
       ["dragenter", "dragover"].forEach(function (eventName) {
         dropzone.addEventListener(eventName, function (event) {
+          if (!event.dataTransfer || !Array.from(event.dataTransfer.types).includes("Files")) return;
           event.preventDefault();
           if (!uploadState.isUploading) {
             dropzone.classList.add("is-dragging");
@@ -2721,12 +2776,12 @@
       });
       ["dragleave", "drop"].forEach(function (eventName) {
         dropzone.addEventListener(eventName, function (event) {
-          event.preventDefault();
+          if (event.dataTransfer && Array.from(event.dataTransfer.types).includes("Files")) event.preventDefault();
           dropzone.classList.remove("is-dragging");
         });
       });
       dropzone.addEventListener("drop", function (event) {
-        if (!uploadState.isUploading && event.dataTransfer) {
+        if (!uploadState.isUploading && event.dataTransfer && event.dataTransfer.files.length) {
           addUploadFiles(event.dataTransfer.files);
         }
       });
@@ -2745,7 +2800,9 @@
 
     app.querySelectorAll("[data-remove-upload]").forEach(function (button) {
       button.addEventListener("click", function (event) {
+        if (uploadState.isUploading) return;
         const itemId = event.currentTarget.getAttribute("data-remove-upload");
+        releaseUploadItems(uploadState.items.filter(item => item.id === itemId));
         uploadState.items = uploadState.items.filter(function (item) { return item.id !== itemId; });
         uploadState.summary = null;
         renderUpload();
@@ -2755,7 +2812,10 @@
     const clearButton = document.getElementById("clearUploadQueue");
     if (clearButton) {
       clearButton.addEventListener("click", function () {
+        if (uploadState.isUploading) return;
+        releaseUploadItems(uploadState.items);
         uploadState.items = [];
+        uploadState.detailsOpen = false;
         uploadState.summary = null;
         renderUpload();
       });
@@ -2790,22 +2850,14 @@
       return;
     }
 
-    const progress = Math.round(Math.min(100, Math.max(0, item.progress || 0)));
     const progressWrap = itemNode.querySelector(".progress-wrap");
-    const progressValue = itemNode.querySelector(".progress-value");
-    const progressLabels = itemNode.querySelectorAll(".progress-label span");
     if (progressWrap) {
-      progressWrap.setAttribute("aria-valuenow", String(progress));
-      progressWrap.setAttribute("aria-valuetext", item.status.message);
-    }
-    if (progressValue) {
-      progressValue.style.width = `${progress}%`;
-    }
-    if (progressLabels[0]) {
-      progressLabels[0].textContent = item.status.message;
-    }
-    if (progressLabels[1]) {
-      progressLabels[1].textContent = `${progress}%`;
+      progressWrap.dataset.state = item.status.type;
+      progressWrap.querySelector(".progress-label span").textContent = item.status.message;
+      if (item.status.type !== "info") {
+        const track = progressWrap.querySelector(".upload-working-track");
+        if (track) track.remove();
+      }
     }
   }
 
@@ -2840,15 +2892,15 @@
       return { type: "error", message: "Processing failed", progress: 70, done: false, failed: true };
     }
     if (["TRANSCRIBING", "TRANSCRIPTION"].includes(status)) {
-      return { type: "info", message: "Transcribing", progress: 48, done: false, failed: false };
+      return { type: "info", message: "Preparing video", progress: 48, done: false, failed: false };
     }
     if (["GENERATING_METADATA", "METADATA", "ENRICHING"].includes(status)) {
-      return { type: "info", message: "Creating metadata", progress: 72, done: false, failed: false };
+      return { type: "info", message: "Preparing video", progress: 72, done: false, failed: false };
     }
     if (["FINALIZING", "SAVING", "COMPLETING"].includes(status)) {
-      return { type: "info", message: "Finalizing", progress: 90, done: false, failed: false };
+      return { type: "info", message: "Preparing video", progress: 90, done: false, failed: false };
     }
-    return { type: "info", message: "Processing", progress: 30, done: false, failed: false };
+    return { type: "info", message: "Preparing video", progress: 30, done: false, failed: false };
   }
 
   function wait(ms) {
@@ -2893,12 +2945,12 @@
       await wait(interval);
     }
 
-    item.status = { type: "success", message: "Uploaded · processing continues" };
+    item.status = { type: "success", message: "Still processing" };
     item.progress = 96;
   }
 
   function uploadPermissionMessage() {
-    return "This account can browse Voxxly, but the current backend limits clip uploads to accounts with administrator upload access.";
+    return "This account doesn’t have upload access.";
   }
 
   async function handleUploadSubmit(event) {
@@ -2916,10 +2968,13 @@
 
     state.host = String(state.host || uploader.username || "").trim();
     const pendingItems = state.items.filter(function (item) { return !item.uploaded; });
+    if (!pendingItems.length) return;
     const invalidItem = pendingItems.find(function (item) { return !String(item.name || "").trim(); });
     if (invalidItem) {
       state.summary = { type: "error", message: "Give every selected clip a title before uploading." };
       renderUpload();
+      const input = document.getElementById("title-" + invalidItem.id);
+      if (input) input.focus();
       return;
     }
     if (!state.host) {
@@ -2929,6 +2984,7 @@
     }
 
     state.isUploading = true;
+    app.querySelectorAll(".upload-preview video").forEach(video => video.pause());
     state.summary = { type: "info", message: `Uploading ${pluralize(pendingItems.length, "clip")} in order…` };
     renderUploadIfActive({ preserveScroll: true });
     let completed = 0;
@@ -2942,6 +2998,7 @@
         return;
       }
       const item = pendingItems[index];
+      item.attempted = true;
       item.status = { type: "info", message: "Uploading" };
       item.progress = 14;
       renderUploadIfActive({ preserveScroll: true });
@@ -2967,7 +3024,7 @@
         profileState.loaded = false;
         completed += 1;
         if (item.clipId) {
-          item.status = { type: "info", message: "Uploaded · queued for processing" };
+          item.status = { type: "info", message: "Preparing video" };
           item.progress = 28;
           processingItems.push(item);
         } else {
@@ -2981,14 +3038,14 @@
         failed += 1;
         item.status = {
           type: "error",
-          message: error.status === 403 ? "Administrator upload access required" : (error.message || "Upload failed")
+          message: error.status === 403 ? "Upload access required" : (error.message || "Upload failed")
         };
         item.progress = item.progress || 0;
 
         if (error.status === 403) {
           permissionDenied = true;
           pendingItems.slice(index + 1).forEach(function (remaining) {
-            remaining.status = { type: "error", message: "Not uploaded · administrator access required" };
+            remaining.status = { type: "error", message: "Upload access required" };
             remaining.progress = 0;
           });
           failed += pendingItems.length - index - 1;
@@ -3038,7 +3095,7 @@
     profileState.loaded = false;
     if (!permissionDenied) {
       if (failed) {
-        state.summary = { type: "error", message: `${completed} uploaded, ${failed} not uploaded. Review each clip below.` };
+        state.summary = { type: "error", message: `${pluralize(failed, "video")} couldn’t upload. Try again.` };
       } else if (processingIssues) {
         state.summary = {
           type: "info",
@@ -3049,7 +3106,7 @@
       }
     }
     renderUploadIfActive({ preserveScroll: true });
-    if (completed) {
+    if (completed && getRoute() !== routes.upload) {
       showToast(`${pluralize(completed, "clip")} added to Voxxly.`);
     }
   }

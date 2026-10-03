@@ -2641,3 +2641,26 @@ html.clip-viewer-open body {
   .auth-wave { margin-bottom: 18px; }
   .auth-legal { margin-top: 28px; }
 }
+
+/* Support inbox uses the same flat surfaces as profiles and upload. */
+.inbox-page { max-width: 880px; margin-inline: auto; }
+.inbox-heading { display:flex; align-items:center; gap:16px; margin-bottom:24px; }
+.inbox-heading h1,.inbox-heading h2 { flex:1; margin:0; font-size:clamp(1.2rem,3vw,1.8rem); }
+.inbox-heading button,.inbox-heading a { flex-shrink:0; }
+.inbox-filters { display:flex; flex-wrap:wrap; gap:8px; padding-bottom:12px; }
+.inbox-filters button[aria-pressed="true"] { color:var(--text); border-color:var(--orange); }
+.inbox-row { width:100%; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:22px 0; border:0; border-bottom:1px solid rgba(255,255,255,.12); border-radius:0; background:transparent; color:inherit; text-align:left; cursor:pointer; }
+.inbox-row>span { min-width:0; }
+.inbox-preview { display:block; margin-top:7px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:55vw; }
+.inbox-row time,.inbox-contact,.inbox-message small { color:var(--muted); font-size:.85rem; }
+.inbox-row time { flex-shrink:0; }
+.inbox-empty { text-align:center; padding:70px 12px; color:var(--muted); }
+.inbox-message { padding:22px 0; border-bottom:1px solid rgba(255,255,255,.12); }
+.inbox-message p { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.6; margin:10px 0 0; }
+.inbox-message.is-reply { padding-left:20px; border-left:2px solid var(--orange); }
+.inbox-reply { display:grid; gap:12px; margin-top:28px; }
+.inbox-reply textarea { width:100%; box-sizing:border-box; resize:vertical; padding:14px; font:inherit; line-height:1.5; color:var(--text); background:var(--bg-soft); border:1px solid var(--line-strong); border-radius:var(--radius-sm); }
+.inbox-reply textarea:focus-visible { outline:1px solid var(--orange); outline-offset:2px; }
+.inbox-reply .primary-button { background:var(--orange); box-shadow:none; }
+.inbox-reply button { justify-self:end; }
+@media(max-width:480px) { .inbox-heading { gap:8px; } .inbox-heading button,.inbox-heading a { padding:10px 12px; } .inbox-row time { max-width:85px; text-align:right; } }

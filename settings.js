@@ -81,6 +81,7 @@
                 : `href="#/settings?section=${id}"`;
               return `<a class="settings-row" data-section="${id}" ${destination}>${icon(id)}<span>${title}</span><svg class="settings-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a>`;
             }).join("")}</section>`).join("")}
+            ${(user.admin === true || user.isAdmin === true) ? '<section class="settings-group"><h2>Administration</h2><a class="settings-row" data-section="inbox" href="#/admin/support">'+icon("support")+'<span>Support inbox</span></a></section>' : ""}
           </nav>
           <p class="settings-empty" role="status" hidden>No settings found.</p>
         </div>

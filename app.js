@@ -48,10 +48,11 @@
     upload: "#/upload",
     profile: "#/profile",
     settings: "#/settings",
+    inbox: "#/admin/support",
     connections: "#/connections"
   };
 
-  const protectedRoutes = new Set([routes.feed, routes.saved, routes.search, routes.upload, routes.profile, routes.settings, routes.connections]);
+  const protectedRoutes = new Set([routes.feed, routes.saved, routes.search, routes.upload, routes.profile, routes.settings, routes.inbox, routes.connections]);
   const accessTokenStorageKey = authConfig.accessTokenStorageKey || "voxxly_access_token";
   const refreshTokenStorageKey = authConfig.refreshTokenStorageKey || "voxxly_refresh_token";
   const deviceIdStorageKey = authConfig.deviceIdStorageKey || "voxxly_device_id";
@@ -4724,6 +4725,13 @@
         break;
       case routes.profile:
         renderProfile();
+        break;
+      case routes.inbox:
+        if (!(currentUser && (currentUser.admin === true || currentUser.isAdmin === true))) {
+          app.innerHTML = '<section class="page-wrap"><h1>Administrators only</h1></section>';
+          break;
+        }
+        settingsCleanup = window.VoxxlySupportInbox.mount(app, { request: requestJson, escape: escapeHtml, toast: showToast });
         break;
       case routes.settings:
         renderSettings();

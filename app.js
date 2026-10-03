@@ -49,11 +49,12 @@
     upload: "#/upload",
     profile: "#/profile",
     settings: "#/settings",
+    analytics: "#/analytics",
     inbox: "#/admin/support",
     connections: "#/connections"
   };
 
-  const protectedRoutes = new Set([routes.feed, routes.saved, routes.search, routes.upload, routes.profile, routes.settings, routes.inbox, routes.connections]);
+  const protectedRoutes = new Set([routes.feed, routes.saved, routes.search, routes.upload, routes.profile, routes.settings, routes.analytics, routes.inbox, routes.connections]);
   const accessTokenStorageKey = authConfig.accessTokenStorageKey || "voxxly_access_token";
   const refreshTokenStorageKey = authConfig.refreshTokenStorageKey || "voxxly_refresh_token";
   const deviceIdStorageKey = authConfig.deviceIdStorageKey || "voxxly_device_id";
@@ -108,6 +109,8 @@
   let failedThumbnailUrls = new Set();
   let clipViewerState = null;
   let settingsCleanup = null;
+  let analyticsCleanup = null;
+  const creatorTracking = window.VoxxlyCreatorTracking.create({ user: () => currentUser, request: requestJson });
   if (playbackTelemetry) window.voxxlyPlaybackDiagnostics = function () {
     const pool = clipViewerState && clipViewerState.pool || feedPool;
     return pool ? pool.samples.slice() : [];
@@ -550,6 +553,7 @@
       credentials: requestOptions.withCredentials || authConfig.withCredentials ? "include" : "same-origin",
       body: requestOptions.body,
       signal: requestOptions.signal,
+      keepalive: Boolean(requestOptions.keepalive),
       cache: requestOptions.cache || "no-store"
     });
 
@@ -679,7 +683,7 @@
 
     primaryNav.querySelectorAll("[data-route]").forEach(function (link) {
       const linkRoute = link.getAttribute("data-route");
-      if ((searchDrawerOpen && linkRoute === routes.search) || (!searchDrawerOpen && linkRoute === route)) {
+      if ((searchDrawerOpen && linkRoute === routes.search) || (!searchDrawerOpen && (linkRoute === route || (route === routes.analytics && linkRoute === routes.profile)))) {
         link.setAttribute("aria-current", "page");
       } else {
         link.removeAttribute("aria-current");
@@ -702,6 +706,9 @@
   }
 
   function resetUserData() {
+    if (analyticsCleanup) { analyticsCleanup(); analyticsCleanup = null; }
+    const toolsDialog = document.getElementById("clipTools");
+    if (toolsDialog) { toolsDialog.close(); toolsDialog.remove(); }
     feedRequests.forEach(function (controller) { controller.abort(); });
     feedRequests.clear();
     creatorRequests.forEach(function (request) { if (request.abortController) request.abortController.abort(); });
@@ -740,6 +747,8 @@
   }
 
   function clearSession() {
+    creatorTracking.stop();
+    creatorTracking.flush(true);
     verificationSentAt = 0;
     verificationSending = false;
     currentUser = null;
@@ -1194,6 +1203,86 @@
     return `<button class="social-action${active ? " is-active" : ""}" type="button" data-${dataName}="${escapeHtml(clipId)}" aria-label="${label} clip" aria-pressed="${active}" ${statePending ? 'aria-busy="true"' : ""} ${pending ? "disabled" : ""}><span class="feed-action-icon feed-action-icon-${iconName}" aria-hidden="true"></span><span data-social-label>${label}</span></button>`;
   }
 
+  function clipModalOpen() { return document.getElementById("videoReport") || document.getElementById("clipTools"); }
+
+  function openClipTools(clipId, trigger) {
+    const clip = findKnownClip(clipId) || (clipViewerState && clipViewerState.clips.find(item => String(item.id) === String(clipId)));
+    if (!clip || !currentUser || String(clip.iosUserId) !== String(currentUser.id) || clipModalOpen()) return;
+    const generation = sessionGeneration;
+    const video = document.querySelector("[data-clip-viewer-video]") || app.querySelector(".soundbite-card.is-active [data-feed-video]");
+    const resume = video && !video.paused;
+    if (video) video.pause();
+    const dialog = document.createElement("dialog");
+    dialog.id = "clipTools"; dialog.className = "clip-tools"; dialog.setAttribute("aria-labelledby", "clipToolsTitle");
+    document.body.appendChild(dialog);
+    let busy = false;
+    const valid = () => dialog.isConnected && generation === sessionGeneration;
+    function dismiss(restorePlayback = true) {
+      if (busy) return;
+      dialog.close(); dialog.remove();
+      if (trigger.isConnected) trigger.focus({ preventScroll: true });
+      if (restorePlayback && resume && video.isConnected && generation === sessionGeneration && !document.hidden) video.play().catch(() => {});
+    }
+    const icons = {
+      delete: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/>',
+      edit: '<path d="m14 4 6 6M3 21l5-1L21 7l-6-6L2 14z"/>',
+      analytics: '<path d="M4 3v17h17M8 15v-4m5 4V6m5 9V9"/>'
+    };
+    function menu() {
+      dialog.innerHTML = `<h2 id="clipToolsTitle" tabindex="-1">Your clip</h2>${[["delete","Delete"],["edit","Edit"],["analytics","View analytics"]].map(([key,label]) => `<button class="clip-tool-choice" type="button" data-action="${key}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[key]}</svg>${label}</button>`).join("")}<button class="secondary-button tool-cancel" type="button">Cancel</button>`;
+      dialog.querySelector(".tool-cancel").onclick = () => dismiss();
+      dialog.querySelectorAll("[data-action]").forEach(button => button.onclick = () => {
+        if (button.dataset.action === "analytics") { dismiss(false); navigate(`#/analytics?clipId=${encodeURIComponent(clipId)}`); }
+        else form(button.dataset.action);
+      });
+    }
+    function refreshClipCollections(deleted, title) {
+      for (const list of [feedState.items, profileState.clips, profileState.reposts, socialState.savedClips, socialState.repostedClips]) {
+        for (let i = list.length - 1; i >= 0; i--) if (String(list[i].id) === String(clipId)) {
+          if (deleted) list.splice(i, 1); else list[i].name = title;
+        }
+      }
+      if (deleted) { socialState.savedIds.delete(String(clipId)); socialState.repostedIds.delete(String(clipId)); feedState.likedIds.delete(String(clipId)); }
+      if (clipViewerState) {
+        const state = clipViewerState;
+        if (deleted) state.clips = state.clips.filter(item => String(item.id) !== String(clipId));
+        else state.clips.forEach(item => { if (String(item.id) === String(clipId)) item.name = title; });
+        if (!state.clips.length) closeClipViewer();
+        else { state.index = Math.min(state.index, state.clips.length - 1); updateClipViewer(); }
+      }
+      if (getRoute() === routes.profile) renderProfile();
+      else if (getRoute() === routes.saved) renderSaved();
+      else if (getRoute() === routes.feed) {
+        feedState.activeIndex = Math.min(feedState.activeIndex, Math.max(0, feedState.items.length - 1));
+        cleanupFeedObservers(false); renderFeed();
+      }
+    }
+    function form(action) {
+      const deleting = action === "delete";
+      dialog.innerHTML = `<h2 id="clipToolsTitle" tabindex="-1">${deleting ? "Delete this clip?" : "Edit clip"}</h2><form>${deleting ? '<p>It will be removed from your profile and feeds.</p>' : `<div class="field"><label for="clipTitle">Title</label><input id="clipTitle" name="title" value="${escapeHtml(clip.name || "")}" maxlength="200" required></div>`}<p class="tool-error" role="alert" hidden></p><div class="actions"><button class="secondary-button" type="button">Cancel</button><button class="${deleting ? "danger-button" : "primary-button"}" type="submit">${deleting ? "Delete" : "Save"}</button></div></form>`;
+      dialog.querySelector('[type="button"]').onclick = () => dismiss();
+      (dialog.querySelector("input") || dialog.querySelector("h2")).focus();
+      dialog.querySelector("form").onsubmit = async event => {
+        event.preventDefault(); if (busy || !valid()) return;
+        const title = deleting ? "" : dialog.querySelector("input").value.trim();
+        if (!deleting && !title) { dialog.querySelector("input").focus(); return; }
+        busy = true; dialog.querySelectorAll("button, input").forEach(el => el.disabled = true);
+        try {
+          await requestJson(`/me/clips/${encodeURIComponent(clipId)}`, { method: deleting ? "DELETE" : "PATCH", headers: { "Content-Type": "application/json" }, body: deleting ? undefined : JSON.stringify({ title }), retryForbidden: false });
+          if (!valid()) return;
+          busy = false; dismiss(false); refreshClipCollections(deleting, title); showToast(deleting ? "Clip deleted" : "Clip updated");
+        } catch (error) {
+          if (!valid()) return;
+          const message = dialog.querySelector(".tool-error"); message.hidden = false; message.textContent = deleting ? "Couldn’t delete. Try again." : "Couldn’t save. Try again.";
+        } finally { busy = false; if (valid()) dialog.querySelectorAll("button, input").forEach(el => el.disabled = false); }
+      };
+    }
+    dialog.addEventListener("cancel", event => { event.preventDefault(); dismiss(); });
+    dialog.addEventListener("keydown", event => event.stopPropagation());
+    dialog.addEventListener("click", event => { if (event.target === dialog && event.clientX && (event.clientX < dialog.getBoundingClientRect().left || event.clientX > dialog.getBoundingClientRect().right || event.clientY < dialog.getBoundingClientRect().top || event.clientY > dialog.getBoundingClientRect().bottom)) dismiss(); });
+    menu(); dialog.showModal(); dialog.querySelector("h2").focus();
+  }
+
   function renderReportButton(clipId) {
     return `<button class="social-action video-report-action" type="button" data-report-clip="${escapeHtml(clipId)}" aria-label="Report video" title="Report video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V3m0 1c5-4 9 4 14 0v10c-5 4-9-4-14 0"/></svg><span>Report</span></button>`;
   }
@@ -1323,7 +1412,7 @@
           ${renderLikeButton(item.id)}
           ${renderSocialButton("save", item.id)}
           ${renderSocialButton("repost", item.id)}
-          ${renderReportButton(item.id)}
+          ${currentUser && String(item.iosUserId) === String(currentUser.id) ? `<button class="social-action video-report-action" type="button" data-more-clip="${escapeHtml(item.id)}" aria-label="More clip options" aria-haspopup="dialog"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg><span>More</span></button>` : renderReportButton(item.id)}
         </aside>`;
   }
 
@@ -1490,6 +1579,11 @@
   }
 
   function bindFeedItemActions(root = app) {
+    root.querySelectorAll("[data-more-clip]").forEach(button => {
+      if (button.dataset.actionBound === "true") return;
+      button.dataset.actionBound = "true";
+      button.addEventListener("click", () => openClipTools(button.dataset.moreClip, button));
+    });
     root.querySelectorAll("[data-report-clip]").forEach(function (button) {
       if (button.dataset.actionBound === "true") return;
       button.dataset.actionBound = "true";
@@ -1527,6 +1621,7 @@
       link.dataset.actionBound = "true";
       link.addEventListener("click", function (event) {
         const clipId = event.currentTarget.getAttribute("data-full-episode");
+        creatorTracking.episode(clipId);
         const record = getWatchRecord(clipId);
         reportInteraction(clipId, record.watchedSec, { hasClickedToFullEpisode: true });
       });
@@ -2458,7 +2553,7 @@
       lastWheelMagnitude = 0;
     };
     const handleWheel = function (event) {
-      if (document.getElementById("videoReport") || (event.target.closest && event.target.closest(".search-drawer, [data-feed-volume-control]"))) {
+      if (clipModalOpen() || (event.target.closest && event.target.closest(".search-drawer, [data-feed-volume-control]"))) {
         return;
       }
       if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
@@ -2571,6 +2666,8 @@
         return;
       }
       if (isActive) {
+        const clip = findKnownClip(candidate.getAttribute("data-clip-id"));
+        if (clip) creatorTracking.select(video, clip, feedState.sharedClipId ? "shared" : "feed");
         playFeedVideo(candidate);
       } else {
         feedPlayRequests.set(video, (feedPlayRequests.get(video) || 0) + 1);
@@ -2659,6 +2756,7 @@
   }
 
   function cleanupFeedObservers(reportWatch, preserveQueue) {
+    creatorTracking.stop();
     const departingClip = feedPool && feedPool.active ? feedPool.active.clip : feedState.items[feedState.activeIndex];
     feedTransitionGeneration += 1;
     if (feedTransitionCleanup) { feedTransitionCleanup(); feedTransitionCleanup = null; }
@@ -3340,6 +3438,7 @@
     if (!clipViewerState) {
       return;
     }
+    creatorTracking.stop();
     const closeOptions = options || {};
     const state = clipViewerState;
     clipViewerState = null;
@@ -3395,6 +3494,7 @@
     if (rail) rail.outerHTML = markup;
     else state.overlay.querySelector(".clip-viewer-stage").insertAdjacentHTML("beforeend", markup);
     bindFeedItemActions(state.overlay);
+    creatorTracking.select(video, clip, getRoute() === routes.saved ? "saved" : "profile");
     const clipName = clip.name || "Untitled soundbite";
     const streamUrl = playbackSource(clip);
     const posterUrl = getAbsoluteThumbnailUrl(clip.thumbnailUrl);
@@ -3457,7 +3557,7 @@
 
   function moveClipViewer(direction) {
     const state = clipViewerState;
-    if (!state || document.getElementById("videoReport")) return false;
+    if (!state || clipModalOpen()) return false;
     const nextIndex = state.index + direction;
     if (nextIndex < 0 || nextIndex >= state.clips.length) return false;
     if (state.transition) state.transition.cancel();
@@ -3493,7 +3593,7 @@
     let wheelTailMagnitude = Infinity;
     let wheelTimer = null;
     const blocked = target => Boolean(target.closest("button, a, input, select, textarea, [data-feed-volume-control]"));
-    const active = () => clipViewerState === state && !document.getElementById("videoReport");
+    const active = () => clipViewerState === state && !clipModalOpen();
     const resetDrag = () => { gesture = null; stage.style.transform = ""; };
     stage.addEventListener("pointerdown", function (event) {
       if (!event.isPrimary) { resetDrag(); return; }
@@ -3582,7 +3682,7 @@
   }
 
   function handleClipViewerKeydown(event) {
-    if (document.getElementById("videoReport") || !clipViewerState) {
+    if (clipModalOpen() || !clipViewerState) {
       return;
     }
     if (event.key === "Escape") {
@@ -4391,6 +4491,7 @@
               : `<button id="followProfile" class="${state.following ? "secondary-button" : "primary-button"} follow-button" type="button" aria-pressed="${state.following}" ${!state.loaded || !state.followStateKnown || state.followPending || state.blockPending ? "disabled" : ""}>${profileIcon(state.following ? "following" : "follow")}<span>${state.following ? "Following" : "Follow"}</span></button><button id="shareProfile" class="secondary-button" type="button">${profileIcon("share")}<span>Share</span></button><button id="reportProfile" class="profile-report-button" type="button" aria-label="Report account" title="Report account">${profileIcon("report")}</button>`}
           </div>
         </div>
+        ${isOwnProfile ? `<a class="profile-analytics-link" href="#/analytics"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 3v17h17M8 15v-4m5 4V6m5 9V9"/></svg>View analytics</a>` : ""}
         ${isOwnProfile && currentUser.emailConfirmed !== true ? verificationPrompt() : ""}
         <section class="profile-section" aria-labelledby="profileClipsTitle">
           <div class="profile-section-head">
@@ -4748,6 +4849,9 @@
   }
 
   function render() {
+    if (analyticsCleanup) { analyticsCleanup(); analyticsCleanup = null; }
+    const toolsDialog = document.getElementById("clipTools");
+    if (toolsDialog) { toolsDialog.close(); toolsDialog.remove(); }
     // Keep settings state (including unsent support drafts) across its nested routes.
     if (settingsCleanup && currentUser && activeRoute === routes.settings && getRoute() === routes.settings) {
       settingsCleanup.updateRoute();
@@ -4853,6 +4957,11 @@
         break;
       case routes.profile:
         renderProfile();
+        break;
+      case routes.analytics:
+        creatorTracking.stop();
+        creatorTracking.flush();
+        analyticsCleanup = window.VoxxlyCreatorAnalytics.mount(app, { request: requestJson, escape: escapeHtml });
         break;
       case routes.inbox:
         if (!(currentUser && (currentUser.admin === true || currentUser.isAdmin === true))) {

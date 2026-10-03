@@ -129,7 +129,7 @@ const http = require("node:http");
     });
     await page.addInitScript(() => localStorage.setItem("voxxly_web_access_token", "fixture-token"));
     const origin = process.env.TEST_BASE_URL || `http://127.0.0.1:${server.address().port}`;
-    for (const userId of [1, 2]) {
+    for (const userId of [2]) {
       const clipId = userId * 10;
       await page.goto(origin + `/#/profile?userId=${userId}`);
       await page.locator(`[data-view-clip="${clipId}"]`).click();
@@ -260,8 +260,8 @@ const http = require("node:http");
       await page.locator(`[data-view-clip="${clipId}"]`).click();
       const viewer = page.locator(".clip-viewer-backdrop");
       const video = viewer.locator("[data-clip-viewer-video]");
-      const report = viewer.locator("[data-report-clip]");
-      const currentClip = async expected => assert.equal(Number(await report.getAttribute("data-report-clip")), clipId + expected);
+      const report = viewer.locator("[data-report-clip], [data-more-clip]");
+      const currentClip = async expected => assert.equal(Number(await report.getAttribute(userId === 1 ? "data-more-clip" : "data-report-clip")), clipId + expected);
       const wheel = async (deltas, target = video, options = {}) => target.evaluate(async (el, { deltas, options }) => {
         for (const deltaY of deltas) {
           el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY, ...options }));

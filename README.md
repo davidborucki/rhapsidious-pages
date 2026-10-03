@@ -29,6 +29,7 @@ Update `config.js` when the API origin or contract changes. The current client u
 - `GET /processing/status?clipId=...` — follow post-upload processing
 - `GET /iosclips/feed?userId=...&sessionId=...` — load recommendations
 - `POST /iosclips/interactions` — record recommendation signals
+- `POST /clips/{clipId}/reports` — report a video from the feed or saved/profile viewer
 - `POST /ios/saved-clips` / `DELETE /ios/saved-clips` — save or remove a clip
 - `POST /ios/reposted-clips` / `DELETE /ios/reposted-clips` — repost or remove a repost
 - `GET /ios/users/search?q=...` — search public profiles

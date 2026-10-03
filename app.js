@@ -695,6 +695,7 @@
     closeClipViewer({ restoreFocus: false });
     if (settingsCleanup) { settingsCleanup(); settingsCleanup = null; }
     closeProfileEditor();
+    closeVideoReport();
     sessionGeneration += 1;
     searchDrawerOpen = false;
     searchDrawer.classList.remove("is-open");
@@ -1019,6 +1020,101 @@
     return `<button class="social-action${active ? " is-active" : ""}" type="button" data-${dataName}="${escapeHtml(clipId)}" aria-label="${label} clip" aria-pressed="${active}" ${statePending ? 'aria-busy="true"' : ""} ${pending ? "disabled" : ""}><span class="feed-action-icon feed-action-icon-${iconName}" aria-hidden="true"></span><span data-social-label>${label}</span></button>`;
   }
 
+  function renderReportButton(clipId) {
+    return `<button class="video-report-action" type="button" data-report-clip="${escapeHtml(clipId)}" aria-label="Report video" title="Report video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V3m0 1c5-4 9 4 14 0v10c-5 4-9-4-14 0"/></svg></button>`;
+  }
+
+  function closeVideoReport() {
+    const dialog = document.getElementById("videoReport");
+    if (dialog) { dialog.close(); dialog.remove(); }
+  }
+
+  function openVideoReport(clipId, trigger) {
+    if (!currentUser || document.getElementById("videoReport")) return;
+    const generation = sessionGeneration;
+    const dialog = document.createElement("dialog");
+    dialog.id = "videoReport";
+    dialog.className = "profile-editor video-report";
+    dialog.setAttribute("aria-labelledby", "videoReportTitle");
+    dialog.innerHTML = `
+      <h2 id="videoReportTitle">Report video</h2>
+      <form class="stack">
+        <div class="field">
+          <label for="reportReason">Reason</label>
+          <select id="reportReason" required>
+            <option value="" disabled selected>Select a reason</option>
+            <option value="COPYRIGHT">Copyright</option>
+            <option value="MATURE_OR_INAPPROPRIATE">Inappropriate content</option>
+            <option value="INCORRECT_CREATOR_OR_SOURCE">Wrong creator or source</option>
+            <option value="HATE_OR_HARASSMENT">Hate or harassment</option>
+            <option value="SPAM_OR_MISLEADING">Spam or misleading</option>
+            <option value="OTHER">Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="reportDetails">Details (optional)</label>
+          <textarea id="reportDetails" rows="3" maxlength="2000"></textarea>
+        </div>
+        <p class="status-error" data-report-error role="alert" hidden></p>
+        <div class="actions">
+          <button class="secondary-button" type="button" data-report-cancel>Cancel</button>
+          <button class="primary-button" type="submit" disabled>Submit</button>
+        </div>
+      </form>`;
+    document.body.appendChild(dialog);
+    const reason = dialog.querySelector("select");
+    const details = dialog.querySelector("textarea");
+    const submit = dialog.querySelector('[type="submit"]');
+    const error = dialog.querySelector("[data-report-error]");
+    let busy = false;
+    const active = () => dialog.isConnected && generation === sessionGeneration && currentUser;
+    const dismiss = () => {
+      closeVideoReport();
+      if (trigger && trigger.isConnected) trigger.focus({ preventScroll: true });
+    };
+    dialog.querySelector("[data-report-cancel]").addEventListener("click", dismiss);
+    dialog.addEventListener("cancel", event => { event.preventDefault(); dismiss(); });
+    // Keep viewer/feed keyboard shortcuts out of the modal, including Escape.
+    dialog.addEventListener("keydown", event => event.stopPropagation());
+    reason.addEventListener("change", () => { submit.disabled = busy || !reason.value; });
+    dialog.querySelector("form").addEventListener("submit", async event => {
+      event.preventDefault();
+      if (busy || !reason.value || !active()) return;
+      busy = true;
+      submit.disabled = reason.disabled = details.disabled = true;
+      submit.textContent = "Submitting…";
+      error.hidden = true;
+      try {
+        await requestJson(`/clips/${encodeURIComponent(clipId)}/reports`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: reason.value, details: details.value.trim() || null })
+        });
+        if (!active()) return;
+        dismiss();
+        showToast("Report sent");
+      } catch (failure) {
+        if (!active()) return;
+        if (failure.status === 409) {
+          dismiss();
+          showToast("Already reported");
+          return;
+        }
+        error.textContent = failure.status === 404 ? "Video unavailable." :
+          failure.status === 429 ? "Too many reports. Try again later." : "Couldn’t send report. Try again.";
+        error.hidden = false;
+      } finally {
+        busy = false;
+        if (active()) {
+          reason.disabled = details.disabled = false;
+          submit.disabled = !reason.value;
+          submit.textContent = "Submit";
+        }
+      }
+    });
+    dialog.showModal();
+  }
+
   function renderLikeButton(clipId) {
     const active = feedState.likedIds.has(String(clipId));
     const label = active ? "Liked" : "Like";
@@ -1058,6 +1154,7 @@
             <svg viewBox="0 0 24 24"><path d="m6.5 5 11 7-11 7V5Z"></path></svg>
           </span>
           ${renderVideoVolumeControl(item.name)}
+          ${renderReportButton(item.id)}
           <button class="feed-audio-prompt hidden" type="button" data-feed-audio-prompt>Tap for sound</button>
           ${item.isMature || item.mature
             ? `<div class="soundbite-labels"><span class="badge badge-warning">Mature${item.minimumAge ? ` · ${escapeHtml(item.minimumAge)}+` : ""}</span></div>`
@@ -1201,6 +1298,11 @@
   }
 
   function bindFeedItemActions() {
+    app.querySelectorAll("[data-report-clip]").forEach(function (button) {
+      if (button.dataset.actionBound === "true") return;
+      button.dataset.actionBound = "true";
+      button.addEventListener("click", function () { openVideoReport(button.dataset.reportClip, button); });
+    });
     app.querySelectorAll("[data-like-clip]").forEach(function (button) {
       if (button.dataset.actionBound === "true") {
         return;
@@ -2164,7 +2266,7 @@
       lastWheelMagnitude = 0;
     };
     const handleWheel = function (event) {
-      if (event.target.closest && event.target.closest(".search-drawer, [data-feed-volume-control]")) {
+      if (document.getElementById("videoReport") || (event.target.closest && event.target.closest(".search-drawer, [data-feed-volume-control]"))) {
         return;
       }
       if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
@@ -3117,7 +3219,7 @@
   }
 
   function handleClipViewerKeydown(event) {
-    if (!clipViewerState) {
+    if (document.getElementById("videoReport") || !clipViewerState) {
       return;
     }
     if (event.key === "Escape") {
@@ -3180,6 +3282,7 @@
       <section class="clip-viewer-dialog">
         <video class="clip-viewer-video" data-clip-viewer-video playsinline loop preload="metadata" tabindex="0" role="button"></video>
         ${renderVideoVolumeControl(selectedClip.name)}
+        ${renderReportButton(selectedClip.id)}
         <span class="clip-viewer-play-indicator" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="m6.5 5 11 7-11 7V5Z"></path></svg>
         </span>
@@ -3230,6 +3333,10 @@
     overlay.querySelector("[data-clip-viewer-close]").addEventListener("click", function () { closeClipViewer(); });
     overlay.querySelector("[data-clip-viewer-previous]").addEventListener("click", function () { moveClipViewer(-1); });
     overlay.querySelector("[data-clip-viewer-next]").addEventListener("click", function () { moveClipViewer(1); });
+    const reportButton = overlay.querySelector("[data-report-clip]");
+    reportButton.addEventListener("click", function () {
+      openVideoReport(clipViewerState.clips[clipViewerState.index].id, reportButton);
+    });
     const viewerVideo = overlay.querySelector("[data-clip-viewer-video]");
     bindFeedVolumeControl(overlay, viewerVideo);
     if (clipViewerState.pool) viewerVideo.remove();
@@ -4249,6 +4356,7 @@
   function render() {
     if (settingsCleanup) { settingsCleanup(); settingsCleanup = null; }
     closeProfileEditor();
+    closeVideoReport();
     closeClipViewer({ restoreFocus: false });
     let route = getRoute();
     if (!route) {

@@ -9,7 +9,7 @@ test("unchanged Apply dismisses before reaching any backend request", () => {
   const fs = require("node:fs");
   const path = require("node:path");
   const source = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
-  const start = source.indexOf('dialog.querySelector("form").addEventListener("submit"');
+  const start = source.indexOf('dialog.querySelector("form").addEventListener("submit"', source.indexOf("function openProfileEditor()"));
   const submit = source.slice(start, source.indexOf("dialog.showModal()", start));
   const guard = 'if (nameInput.value.trim() === originalName && input.value.trim() === original && !photo)';
   assert.ok(submit.indexOf(guard) >= 0);

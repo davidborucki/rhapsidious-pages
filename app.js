@@ -1039,6 +1039,15 @@
   }
 
   function openVideoReport(clipId, trigger, keyboardTriggered = false) {
+    openReport({ type: "video", id: clipId }, trigger, keyboardTriggered);
+  }
+
+  function openReport(target, trigger, keyboardTriggered = false) {
+    const isAccount = target.type === "account";
+    if (isAccount && (!currentUser || String(target.id) === String(currentUser.id))) return;
+    const reasons = isAccount
+      ? [["HARASSMENT_OR_ABUSE", "Harassment or abuse"], ["IMPERSONATION", "Impersonation"], ["INAPPROPRIATE_PROFILE", "Inappropriate profile"], ["SPAM", "Spam"], ["OTHER", "Other"]]
+      : [["COPYRIGHT", "Copyright"], ["MATURE_OR_INAPPROPRIATE", "Inappropriate content"], ["INCORRECT_CREATOR_OR_SOURCE", "Wrong creator or source"], ["HATE_OR_HARASSMENT", "Hate or harassment"], ["SPAM_OR_MISLEADING", "Spam or misleading"], ["OTHER", "Other"]];
     if (!currentUser || document.getElementById("videoReport")) return;
     const generation = sessionGeneration;
     const dialog = document.createElement("dialog");
@@ -1046,18 +1055,13 @@
     dialog.className = "profile-editor video-report";
     dialog.setAttribute("aria-labelledby", "videoReportTitle");
     dialog.innerHTML = `
-      <h2 id="videoReportTitle" tabindex="-1" autofocus>Report video</h2>
+      <h2 id="videoReportTitle" tabindex="-1" autofocus>Report ${isAccount ? "account" : "video"}</h2>
       <form class="stack">
         <div class="field">
           <label for="reportReason">Reason</label>
           <select id="reportReason" required>
             <option value="" disabled selected>Select a reason</option>
-            <option value="COPYRIGHT">Copyright</option>
-            <option value="MATURE_OR_INAPPROPRIATE">Inappropriate content</option>
-            <option value="INCORRECT_CREATOR_OR_SOURCE">Wrong creator or source</option>
-            <option value="HATE_OR_HARASSMENT">Hate or harassment</option>
-            <option value="SPAM_OR_MISLEADING">Spam or misleading</option>
-            <option value="OTHER">Other</option>
+            ${reasons.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}
           </select>
         </div>
         <div class="field">
@@ -1069,7 +1073,8 @@
           <button class="secondary-button" type="button" data-report-cancel>Cancel</button>
           <button class="primary-button" type="submit" disabled>Submit</button>
         </div>
-      </form>`;
+      </form>
+      ${isAccount ? '<button class="profile-block-action" type="button" data-report-block>Block account</button>' : ""}`;
     document.body.appendChild(dialog);
     const reason = dialog.querySelector("select");
     const details = dialog.querySelector("textarea");
@@ -1085,6 +1090,12 @@
       }
     };
     dialog.querySelector("[data-report-cancel]").addEventListener("click", dismiss);
+    const block = dialog.querySelector("[data-report-block]");
+    if (block) block.addEventListener("click", () => {
+      if (busy || !active() || String(profileState.userId) !== String(target.id)) return;
+      dismiss();
+      handleBlockToggle();
+    });
     dialog.addEventListener("cancel", event => { event.preventDefault(); dismiss(); });
     // Keep viewer/feed keyboard shortcuts out of the modal, including Escape.
     dialog.addEventListener("keydown", event => event.stopPropagation());
@@ -1097,7 +1108,7 @@
       submit.textContent = "Submitting…";
       error.hidden = true;
       try {
-        await requestJson(`/clips/${encodeURIComponent(clipId)}/reports`, {
+        await requestJson(`/${isAccount ? "users" : "clips"}/${encodeURIComponent(target.id)}/reports`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ reason: reason.value, details: details.value.trim() || null })
@@ -1112,7 +1123,7 @@
           showToast("Already reported");
           return;
         }
-        error.textContent = failure.status === 404 ? "Video unavailable." :
+        error.textContent = failure.status === 404 ? (isAccount ? "Account unavailable." : "Video unavailable.") :
           failure.status === 429 ? "Too many reports. Try again later." : "Couldn’t send report. Try again.";
         error.hidden = false;
       } finally {
@@ -4000,6 +4011,48 @@
     input.focus();
   }
 
+  async function shareProfile(userId) {
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.hash = getProfileRoute(userId);
+    const generation = sessionGeneration;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url.href);
+      } else {
+        const field = document.createElement("textarea");
+        field.value = url.href;
+        field.className = "clipboard-copy-field";
+        field.setAttribute("readonly", "");
+        document.body.appendChild(field);
+        const previousFocus = document.activeElement;
+        try {
+          field.select();
+          field.setSelectionRange(0, field.value.length);
+          if (!document.execCommand("copy")) throw new Error("Clipboard unavailable");
+        } finally {
+          field.remove();
+          if (previousFocus && previousFocus.isConnected) previousFocus.focus({ preventScroll: true });
+        }
+      }
+      if (generation === sessionGeneration) showToast("Copied to clipboard");
+    } catch (_) {
+      if (generation === sessionGeneration) showToast("Couldn’t copy link. Try again.");
+    }
+  }
+
+  function profileIcon(name) {
+    const paths = {
+      follow: '<circle cx="9" cy="8" r="4"/><path d="M2 21v-2a7 7 0 0 1 14 0v2m3-14v6m-3-3h6"/>',
+      following: '<circle cx="9" cy="8" r="4"/><path d="M2 21v-2a7 7 0 0 1 14 0v2m0-10 2 2 4-4"/>',
+      share: '<path d="M12 16V3m-5 5 5-5 5 5M5 13v8h14v-8"/>',
+      edit: '<path d="m16 3 5 5-12 12-6 1 1-6L16 3Zm-3 3 5 5"/>',
+      settings: '<path d="m9 3-1 3-3 1-2 4 2 2v3l3 2 1 3h6l1-3 3-2v-3l2-2-2-4-3-1-1-3Z"/><circle cx="12" cy="12" r="3"/>',
+      report: '<path d="M5 21V3m0 1c5-4 9 4 14 0v10c-5 4-9-4-14 0"/>'
+    };
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
+  }
+
   function renderProfile() {
     const state = profileState;
     const targetUserId = state.userId || (currentUser && String(currentUser.id)) || "";
@@ -4086,20 +4139,23 @@
     app.innerHTML = `
       <section class="page-wrap profile-page" aria-labelledby="profileTitle">
         <div class="panel profile-hero">
-          ${avatarMarkup(user, user.username, "profile-avatar")}
-          <div class="profile-identity">
-            <div class="profile-name-row"><h1 id="profileTitle" class="profile-name">${escapeHtml(user.username || "Voxxly creator")}</h1>${isOwnProfile ? '<button id="editProfile" class="secondary-button" type="button">Edit profile</button><a class="secondary-button profile-settings-button" href="#/settings" aria-label="Settings" title="Settings"><span aria-hidden="true"></span></a>' : (state.loaded ? `<button id="blockProfile" class="secondary-button" type="button" ${state.blockPending || state.followPending ? "disabled" : ""}>${state.blockPending ? "…" : "Block"}</button>` : "")}</div>
-            <p class="profile-handle">@${escapeHtml(user.username || "creator")}</p>
-            ${!isOwnProfile && state.loaded
-              ? (state.followStateKnown
-                ? `<button id="followProfile" class="${state.following ? "secondary-button" : "primary-button"} follow-button" type="button" aria-pressed="${state.following}" ${state.followPending || state.blockPending ? "disabled" : ""}>${state.followPending ? "Updating…" : (state.following ? "Following" : "Follow")}</button>`
-                : `<button class="secondary-button follow-button" type="button" disabled>Follow unavailable</button>`)
-              : ""}
+          ${!isOwnProfile ? `<div class="profile-toolbar"><button id="reportProfile" class="profile-report-button" type="button" aria-label="Report account" title="Report account">${profileIcon("report")}</button></div>` : ""}
+          <div class="profile-overview">
+            ${avatarMarkup(user, user.username, "profile-avatar")}
+            <div class="profile-identity">
+              <h1 id="profileTitle" class="profile-name">${escapeHtml(user.username || "Voxxly creator")}</h1>
+              <p class="profile-handle">@${escapeHtml(user.username || "creator")}</p>
+            </div>
+            <div class="profile-stats" aria-label="Profile statistics">
+              <a class="profile-stat" href="${routes.connections}?userId=${encodeURIComponent(targetUserId)}&type=following"><strong>${followingDisplay}</strong><span>Following</span></a>
+              <a class="profile-stat" href="${routes.connections}?userId=${encodeURIComponent(targetUserId)}&type=followers"><strong>${followerDisplay}</strong><span>Followers</span></a>
+              <div class="profile-stat"><strong>${formatCount(clipCount)}</strong><span>Posts</span></div>
+            </div>
           </div>
-          <div class="profile-stats" aria-label="Profile statistics">
-            <div class="profile-stat"><strong>${formatCount(clipCount)}</strong><span>Posts</span></div>
-            <a class="profile-stat" href="${routes.connections}?userId=${encodeURIComponent(targetUserId)}&type=followers"><strong>${followerDisplay}</strong><span>Followers</span></a>
-            <a class="profile-stat" href="${routes.connections}?userId=${encodeURIComponent(targetUserId)}&type=following"><strong>${followingDisplay}</strong><span>Following</span></a>
+          <div class="profile-actions">
+            ${isOwnProfile
+              ? `<button id="editProfile" class="secondary-button" type="button">${profileIcon("edit")}<span>Edit profile</span></button><a class="secondary-button" href="#/settings">${profileIcon("settings")}<span>Settings</span></a>`
+              : `<button id="followProfile" class="${state.following ? "secondary-button" : "primary-button"} follow-button" type="button" aria-pressed="${state.following}" ${!state.loaded || !state.followStateKnown || state.followPending || state.blockPending ? "disabled" : ""}>${profileIcon(state.following ? "following" : "follow")}<span>${state.following ? "Following" : "Follow"}</span></button><button id="shareProfile" class="secondary-button" type="button">${profileIcon("share")}<span>Share</span></button>`}
           </div>
         </div>
         <section class="profile-section" aria-labelledby="profileClipsTitle">
@@ -4125,8 +4181,10 @@
 
     const editButton = document.getElementById("editProfile");
     if (editButton) editButton.addEventListener("click", openProfileEditor);
-    const blockButton = document.getElementById("blockProfile");
-    if (blockButton) blockButton.addEventListener("click", handleBlockToggle);
+    const shareButton = document.getElementById("shareProfile");
+    if (shareButton) shareButton.addEventListener("click", () => shareProfile(targetUserId));
+    const reportButton = document.getElementById("reportProfile");
+    if (reportButton) reportButton.addEventListener("click", event => openReport({ type: "account", id: targetUserId }, reportButton, event.detail === 0));
     const followButton = document.getElementById("followProfile");
     if (followButton) {
       followButton.addEventListener("click", handleFollowToggle);
@@ -4281,7 +4339,7 @@
     state.followPending = true;
     if (activeButton) {
       activeButton.disabled = true;
-      activeButton.textContent = "Updating…";
+      activeButton.setAttribute("aria-busy", "true");
     }
 
     try {

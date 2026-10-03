@@ -42,7 +42,7 @@ const http = require('node:http');
       await page.setViewportSize({width,height:844});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
       const css=await page.locator('.email-verification').evaluate(el=>({background:getComputedStyle(el).backgroundColor,gradient:getComputedStyle(el).backgroundImage}));
-      assert.deepEqual(css,{background:'rgba(0, 0, 0, 0)',gradient:'none'});
+      assert.deepEqual(css,{background:'rgba(255, 130, 0, 0.1)',gradient:'none'});
       await shot('profile-'+width);
     }
     await page.setViewportSize({width:390,height:844});

@@ -1063,10 +1063,10 @@ h1[tabindex="-1"]:focus {
   display: grid;
   place-items: center;
   overflow: hidden;
-  color: #1b0d03;
+  color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--orange-bright), var(--red));
+  background: var(--surface-raised);
   font-weight: 700;
 }
 
@@ -1418,7 +1418,6 @@ h1[tabindex="-1"]:focus {
   font-size: 2rem;
   border: 0;
   box-shadow: none;
-  background: var(--surface-raised);
 }
 .profile-name {
   margin: 0;
@@ -2665,7 +2664,8 @@ html.clip-viewer-open body {
 .inbox-reply button { justify-self:end; }
 @media(max-width:480px) { .inbox-heading { gap:8px; } .inbox-heading button,.inbox-heading a { padding:10px 12px; } .inbox-row time { max-width:85px; text-align:right; } }
 
-.email-verification { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:20px 6px; }
-.email-verification p { margin:0; color:var(--muted-strong); font-size:.9rem; }
-.email-verification button { flex-shrink:0; background:none; box-shadow:none; padding:10px 16px; font-size:.85rem; }
+.email-verification { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:16px 18px; border:1px solid rgba(255,130,0,.18); border-radius:var(--radius-md); background:rgba(255,130,0,.1); }
+.email-verification p { margin:0; color:#f1d0ae; font-size:.9rem; }
+.email-verification button { flex-shrink:0; color:#ffd7ad; border-color:rgba(255,130,0,.3); background:none; box-shadow:none; padding:10px 16px; font-size:.85rem; }
+.email-verification button:hover:not(:disabled) { background:rgba(255,130,0,.1); border-color:rgba(255,130,0,.45); transform:none; }
 #confirmEmailStatus { margin-top:18px; }

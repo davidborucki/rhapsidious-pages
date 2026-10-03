@@ -3488,6 +3488,9 @@
     let suppressClickUntil = 0;
     let wheelDistance = 0;
     let wheelConsumed = false;
+    let wheelDirection = 0;
+    let wheelConsumedAt = 0;
+    let wheelTailMagnitude = Infinity;
     let wheelTimer = null;
     const blocked = target => Boolean(target.closest("button, a, input, select, textarea, [data-feed-volume-control]"));
     const active = () => clipViewerState === state && !document.getElementById("videoReport");
@@ -3537,16 +3540,39 @@
       }
     }, true);
     overlay.addEventListener("wheel", function (event) {
-      if (!active() || blocked(event.target) || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+      if (!active() || event.ctrlKey || event.target.closest("input, select, textarea, [data-feed-volume-control]") || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
       event.preventDefault();
       clearTimeout(wheelTimer);
-      wheelTimer = setTimeout(function () { wheelDistance = 0; wheelConsumed = false; }, 180);
-      if (wheelConsumed) return;
+      wheelTimer = setTimeout(function () {
+        wheelDistance = 0;
+        wheelConsumed = false;
+        wheelDirection = 0;
+        wheelTailMagnitude = Infinity;
+      }, 180);
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? stage.clientHeight : 1;
-      wheelDistance += event.deltaY * unit;
+      const delta = event.deltaY * unit;
+      const magnitude = Math.abs(delta);
+      const direction = delta > 0 ? 1 : -1;
+      const now = performance.now();
+      if (wheelConsumed) {
+        // Trackpads keep emitting momentum between swipes. Accept a deliberate
+        // reversal or a fresh impulse after the tail, without skipping on inertia.
+        const reversed = direction !== wheelDirection && magnitude >= 12;
+        const renewed = now - wheelConsumedAt >= 300 && magnitude >= 14 && magnitude >= wheelTailMagnitude * 1.8;
+        wheelTailMagnitude = Math.min(wheelTailMagnitude, magnitude);
+        if (!reversed && !renewed) return;
+        wheelConsumed = false;
+        wheelDistance = 0;
+      }
+      if (direction !== wheelDirection) wheelDistance = 0;
+      wheelDirection = direction;
+      wheelDistance += delta;
       if (Math.abs(wheelDistance) < 44) return;
       wheelConsumed = true;
-      moveClipViewer(wheelDistance > 0 ? 1 : -1);
+      wheelConsumedAt = now;
+      wheelTailMagnitude = magnitude;
+      wheelDistance = 0;
+      moveClipViewer(direction);
     }, { passive: false });
     return function () {
       clearTimeout(wheelTimer);
@@ -4599,7 +4625,6 @@
       <a class="user-result" href="${escapeHtml(getProfileRoute(user.id))}">
         ${avatarMarkup(user, user.username, "user-result-avatar")}
         <span><strong>${escapeHtml(user.username || "Voxxly user")}</strong><small>@${escapeHtml(user.username || "user")}</small></span>
-        <span class="result-arrow" aria-hidden="true">→</span>
       </a>
     `;
   }
@@ -4629,7 +4654,7 @@
 
     app.innerHTML = `
       <section class="page-wrap connections-page" aria-labelledby="connectionsTitle">
-        <a class="back-link" href="${escapeHtml(getProfileRoute(state.userId))}">← Back to @${escapeHtml(ownerName)}</a>
+        <a class="back-link" href="${escapeHtml(getProfileRoute(state.userId))}">Back to @${escapeHtml(ownerName)}</a>
         <header class="page-header">
           <h1 id="connectionsTitle" class="page-title">${label}</h1>
         </header>

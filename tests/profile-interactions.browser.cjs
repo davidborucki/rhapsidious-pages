@@ -101,7 +101,8 @@ const http = require("node:http");
     page.on("pageerror", error => failures.push(error.message));
     const requests = [];
     let failSave = false;
-    const clipsFor = userId => [0, 1].map(i => ({ id: userId * 10 + i, iosUserId: userId, name: `Video ${userId * 10 + i}`, fullEpisodeFilepath: `https://example.test/episode/${userId * 10 + i}`, creator: { id: userId, username: `creator${userId}` } }));
+    let clipCount = 2;
+    const clipsFor = userId => Array.from({ length: clipCount }, (_, i) => i).map(i => ({ id: userId * 10 + i, iosUserId: userId, name: `Video ${userId * 10 + i}`, fullEpisodeFilepath: `https://example.test/episode/${userId * 10 + i}`, creator: { id: userId, username: `creator${userId}` } }));
     const waitForRequest = async predicate => {
       for (let i = 0; i < 100; i++) {
         if (requests.some(predicate)) return;
@@ -117,6 +118,7 @@ const http = require("node:http");
       if (url.pathname === "/auth/me") body = { id: 1, username: "creator1" };
       else if (/^\/ios\/users\/[12]$/.test(url.pathname)) { const id = Number(url.pathname.split("/").pop()); body = { id, username: `creator${id}` }; }
       else if (/^\/ios\/users\/[12]\/clips$/.test(url.pathname)) body = clipsFor(Number(url.pathname.split("/")[3]));
+      else if (/^\/ios\/users\/[12]\/(followers|following)$/.test(url.pathname)) body = [{ id: 2, username: "creator2" }];
       else if (url.pathname === "/iosclips/feed") body = clipsFor(2);
       else if (url.pathname.endsWith("/follow-counts")) body = { followerCount: 0, followingCount: 0 };
       else if (url.pathname.includes("/follows/")) body = { following: false };
@@ -249,6 +251,63 @@ const http = require("node:http");
       await viewer.locator("[data-clip-viewer-close]").click();
       await page.emulateMedia({ reducedMotion: "no-preference" });
     }
+    // Realistic wheel streams: momentum continues while a new swipe starts.
+    // More than two clips exposes accidental multi-video jumps from one gesture.
+    clipCount = 4;
+    for (const userId of [1, 2]) {
+      const clipId = userId * 10;
+      await page.goto(origin + `/#/profile?userId=${userId}`);
+      await page.locator(`[data-view-clip="${clipId}"]`).click();
+      const viewer = page.locator(".clip-viewer-backdrop");
+      const video = viewer.locator("[data-clip-viewer-video]");
+      const report = viewer.locator("[data-report-clip]");
+      const currentClip = async expected => assert.equal(Number(await report.getAttribute("data-report-clip")), clipId + expected);
+      const wheel = async (deltas, target = video, options = {}) => target.evaluate(async (el, { deltas, options }) => {
+        for (const deltaY of deltas) {
+          el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY, ...options }));
+          await new Promise(resolve => setTimeout(resolve, 35));
+        }
+      }, { deltas, options });
+      await wheel([100, 80, 60, 40, 30, 20, 12, 8, 6, 4, 2]);
+      await currentClip(1); // the entire momentum tail advances only once
+      await wheel([8, 12, 18, 26, 18, 12, 8, 4, 2]);
+      await currentClip(2); // a gradual new impulse works without a quiet gap
+      await wheel([-16, -30, -20, -12, -6, -2]);
+      await currentClip(1); // reverse immediately, even while momentum is arriving
+      await page.waitForTimeout(200);
+      await wheel([-3], video, { deltaMode: 1 });
+      await currentClip(0); // line-mode mouse wheels are normalized too
+      await page.waitForTimeout(200);
+      await wheel([-1], video, { deltaMode: 2 });
+      await currentClip(0); // previous at the first clip stays put
+      await wheel([100], report);
+      await currentClip(1); // reversal at the boundary and scrolling over controls
+      await page.waitForTimeout(200);
+      await wheel([100], video, { ctrlKey: true });
+      await wheel([40], video, { deltaX: 100 });
+      await wheel([100], viewer.locator("[data-feed-mute-toggle]"));
+      await currentClip(1); // pinch, sideways gestures, and volume stay untouched
+      await report.click();
+      await wheel([100]);
+      await currentClip(1); // a report dialog blocks background navigation
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
+      await viewer.locator("[data-clip-viewer-close]").click();
+      for (const type of ["followers", "following"]) {
+        await page.goto(origin + `/#/connections?userId=${userId}&type=${type}`);
+        const row = page.locator(".connections-page .user-result");
+        await row.waitFor();
+        assert.equal(await row.locator(".result-arrow").count(), 0);
+        const back = page.locator(".connections-page .back-link");
+        assert.equal(await back.textContent(), `Back to @creator${userId}`);
+        await row.click();
+        await page.locator("#shareProfile").waitFor();
+        assert.ok(page.url().endsWith("#/profile?userId=2"));
+        await page.goBack();
+        await page.locator(".connections-page .back-link").click();
+        await page.locator(".profile-stats").waitFor();
+        assert.ok(page.url().endsWith(`#/profile?userId=${userId}`));
+      }
+    }
     // The feed uses the exact same rendered stack and report focus behavior.
     await page.goto(origin + "/#/feed");
     const report = page.locator(".soundbite-card.is-active [data-report-clip]");
@@ -257,6 +316,6 @@ const http = require("node:http");
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     assert.equal(await report.evaluate(el => el.matches(":focus-visible")), false);
     assert.deepEqual(failures, []);
-    console.log("Profile interaction checks passed: own/other profiles, exact stack order, responsive layout, equal close/mute insets and continuous visibility through drag/animation/viewport changes, mid-transition close, reduced motion, vertical swipes and boundaries, Watch/Like/Save/Repost/Report, failed-save rollback, navigation state, report focus and pointer/keyboard dismissal.");
+    console.log("Profile interaction checks passed: own/other profiles, exact stack order, responsive layout, equal close/mute insets and continuous visibility through drag/animation/viewport changes, mid-transition close, reduced motion, vertical swipes and boundaries, repeated trackpad swipes through momentum, control hover, wheel normalization, arrow-free connection navigation, Watch/Like/Save/Repost/Report, failed-save rollback, navigation state, report focus and pointer/keyboard dismissal.");
   } finally { if (browser) await browser.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

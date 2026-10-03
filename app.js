@@ -4128,7 +4128,6 @@
     app.innerHTML = `
       <section class="page-wrap profile-page" aria-labelledby="profileTitle">
         <div class="panel profile-hero">
-          ${!isOwnProfile ? `<div class="profile-toolbar"><button id="reportProfile" class="profile-report-button" type="button" aria-label="Report account" title="Report account">${profileIcon("report")}</button></div>` : ""}
           <div class="profile-overview">
             ${avatarMarkup(user, user.username, "profile-avatar")}
             <div class="profile-identity">
@@ -4141,10 +4140,10 @@
               <a class="profile-stat" href="${routes.connections}?userId=${encodeURIComponent(targetUserId)}&type=following"><strong>${followingDisplay}</strong><span>Following</span></a>
             </div>
           </div>
-          <div class="profile-actions">
+          <div class="profile-actions${isOwnProfile ? "" : " profile-actions-with-report"}">
             ${isOwnProfile
               ? `<button id="editProfile" class="secondary-button" type="button">${profileIcon("edit")}<span>Edit profile</span></button><a class="secondary-button" href="#/settings">${profileIcon("settings")}<span>Settings</span></a>`
-              : `<button id="followProfile" class="${state.following ? "secondary-button" : "primary-button"} follow-button" type="button" aria-pressed="${state.following}" ${!state.loaded || !state.followStateKnown || state.followPending || state.blockPending ? "disabled" : ""}>${profileIcon(state.following ? "following" : "follow")}<span>${state.following ? "Following" : "Follow"}</span></button><button id="shareProfile" class="secondary-button" type="button">${profileIcon("share")}<span>Share</span></button>`}
+              : `<button id="followProfile" class="${state.following ? "secondary-button" : "primary-button"} follow-button" type="button" aria-pressed="${state.following}" ${!state.loaded || !state.followStateKnown || state.followPending || state.blockPending ? "disabled" : ""}>${profileIcon(state.following ? "following" : "follow")}<span>${state.following ? "Following" : "Follow"}</span></button><button id="shareProfile" class="secondary-button" type="button">${profileIcon("share")}<span>Share</span></button><button id="reportProfile" class="profile-report-button" type="button" aria-label="Report account" title="Report account">${profileIcon("report")}</button>`}
           </div>
         </div>
         <section class="profile-section" aria-labelledby="profileClipsTitle">

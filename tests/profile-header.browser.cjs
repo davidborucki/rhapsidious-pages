@@ -67,7 +67,7 @@ const http = require("node:http");
       await page.getByRole("heading", { name: "No reposts yet", exact: true }).waitFor();
       assert.equal((await page.locator(".empty-state").textContent()).trim(), "No reposts yet");
       await page.getByRole("link", { name: "Posts 0", exact: true }).click();
-      assert.deepEqual(await page.locator(".profile-actions > *").allTextContents(), id === 1 ? ["Edit profile", "Settings"] : ["Follow", "Share"]);
+      assert.deepEqual(await page.locator(".profile-actions > *").allTextContents(), id === 1 ? ["Edit profile", "Settings"] : ["Follow", "Share", ""]);
       assert.equal(await page.locator("#reportProfile").count(), id === 1 ? 0 : 1);
       for (const width of [320, 390, 768, 1440]) {
         await page.setViewportSize({ width, height: 844 });
@@ -85,11 +85,15 @@ const http = require("node:http");
             avatarBorder: getComputedStyle(avatar).borderWidth,
             avatarShadow: getComputedStyle(avatar).boxShadow,
             equalButtons: Math.abs(boxes[0].width - boxes[1].width) < 1 && Math.abs(boxes[0].y - boxes[1].y) < 1,
-            iconFirst: buttons.every(button => button.firstElementChild.tagName.toLowerCase() === "svg" && button.querySelector("svg").getBoundingClientRect().right <= button.querySelector("span").getBoundingClientRect().left),
-            reportTopRight: !report || report.getBoundingClientRect().bottom <= n.top && report.getBoundingClientRect().right >= n.right - 1
+            iconFirst: buttons.filter(button => button !== report).every(button => button.firstElementChild.tagName.toLowerCase() === "svg" && button.querySelector("svg").getBoundingClientRect().right <= button.querySelector("span").getBoundingClientRect().left),
+            reportOnRight: !report || (() => {
+              const box = report.getBoundingClientRect();
+              return box.left > boxes[1].right && Math.abs(box.y + box.height / 2 - boxes[1].y - boxes[1].height / 2) < 1
+                && box.width === box.height && getComputedStyle(report).borderRadius === "50%" && report.textContent === "";
+            })()
           };
         });
-        assert.deepEqual(geometry, { overflow: false, avatarLeft: true, gradient: "none", avatarBorder: "0px", avatarShadow: "none", equalButtons: true, iconFirst: true, reportTopRight: true });
+        assert.deepEqual(geometry, { overflow: false, avatarLeft: true, gradient: "none", avatarBorder: "0px", avatarShadow: "none", equalButtons: true, iconFirst: true, reportOnRight: true });
         if (process.env.REPORT_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.REPORT_SCREENSHOT_DIR, `header-${id}-${isWebkit ? "webkit" : "chromium"}-${width}.png`), fullPage: true });
       }
       await page.setViewportSize({ width: 390, height: 844 });
@@ -105,6 +109,9 @@ const http = require("node:http");
     await follow.click();
     await page.getByRole("button", { name: "Following", exact: true }).waitFor();
     assert.equal(await follow.getAttribute("aria-pressed"), "true");
+    await page.setViewportSize({ width: 320, height: 844 });
+    assert.equal(await follow.evaluate(button => button.scrollWidth <= button.clientWidth), true);
+    await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(requests.some(r => r.path === "/ios/follows" && r.method === "POST" && r.body.followedUserId === 2));
     failFollow = true;
     await follow.click();

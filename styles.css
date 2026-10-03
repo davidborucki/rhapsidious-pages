@@ -1953,8 +1953,7 @@ html.clip-viewer-open body {
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.85);
 }
 
-.clip-viewer-close,
-.clip-viewer-arrow {
+.clip-viewer-close {
   display: grid;
   place-items: center;
   color: #fff;
@@ -1965,8 +1964,7 @@ html.clip-viewer-open body {
   transition: background-color 150ms ease, transform 150ms ease;
 }
 
-.clip-viewer-close:hover,
-.clip-viewer-arrow:hover {
+.clip-viewer-close:hover {
   background: rgba(54, 52, 62, 0.98);
 }
 
@@ -1986,39 +1984,6 @@ html.clip-viewer-open body {
   background: currentColor;
   -webkit-mask: url("./assets/x.svg") center / contain no-repeat;
   mask: url("./assets/x.svg") center / contain no-repeat;
-}
-
-.clip-viewer-arrow {
-  width: 48px;
-  height: 48px;
-}
-
-.clip-viewer-arrow-previous {
-  grid-column: 1;
-  grid-row: 1;
-}
-
-.clip-viewer-arrow-next {
-  grid-column: 3;
-  grid-row: 1;
-}
-
-.clip-viewer-arrow:hover {
-  transform: scale(1.06);
-}
-
-.clip-viewer-arrow svg {
-  width: 27px;
-  height: 27px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.clip-viewer-arrow[hidden] {
-  display: none;
 }
 
 .profile-clip-copy {
@@ -2350,21 +2315,6 @@ html.clip-viewer-open body {
     width: min(calc(100vw - 24px), calc(56.25dvh - 20px));
     grid-column: 1;
     grid-row: 1;
-  }
-
-  .clip-viewer-arrow {
-    position: absolute;
-    z-index: 3;
-    width: 42px;
-    height: 42px;
-  }
-
-  .clip-viewer-arrow-previous {
-    left: 18px;
-  }
-
-  .clip-viewer-arrow-next {
-    right: 18px;
   }
 
   .clip-viewer-close {
@@ -2838,6 +2788,7 @@ html.clip-viewer-open body {
 /* Use the same rail as Soundbytes; the viewer owns only its placement. */
 .clip-viewer-stage {
   position: relative;
+  touch-action: pan-x pinch-zoom;
   grid-column: 2;
   grid-row: 1;
   display: grid;
@@ -2873,10 +2824,5 @@ html.clip-viewer-open body {
   .clip-viewer-stage .feed-creator-avatar { width: 46px; height: 46px; }
   .clip-viewer-stage .feed-watch-action { bottom: calc(100% + 10px); }
   .clip-viewer-stage .clip-viewer-copy { right: 80px; }
-  .clip-viewer-backdrop .clip-viewer-arrow {
-    top: auto;
-    bottom: 14px;
-  }
-  .clip-viewer-backdrop .clip-viewer-arrow-previous { left: calc(50% - 50px); }
-  .clip-viewer-backdrop .clip-viewer-arrow-next { right: calc(50% - 50px); }
+
 }

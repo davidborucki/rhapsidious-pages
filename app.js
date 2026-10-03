@@ -3110,6 +3110,7 @@
     const closeOptions = options || {};
     const state = clipViewerState;
     clipViewerState = null;
+    if (state.cleanupNavigation) state.cleanupNavigation();
     document.removeEventListener("keydown", handleClipViewerKeydown);
     const video = state.overlay.querySelector("[data-clip-viewer-video]");
     if (state.pool) state.pool.destroy();
@@ -3154,8 +3155,6 @@
     }
     const title = state.overlay.querySelector("[data-clip-viewer-title]");
     const creatorLink = state.overlay.querySelector("[data-clip-viewer-creator]");
-    const previousButton = state.overlay.querySelector("[data-clip-viewer-previous]");
-    const nextButton = state.overlay.querySelector("[data-clip-viewer-next]");
     const creator = embeddedCreator(clip) || creatorCache.get(String(clip.iosUserId)) || (profileState.user && String(profileState.user.id) === String(clip.iosUserId) ? profileState.user : null);
     const creatorName = (creator && creator.username) || clip.creatorName || "Voxxly creator";
     const rail = state.overlay.querySelector(".feed-action-rail");
@@ -3183,10 +3182,6 @@
     creatorLink.href = getProfileRoute(clip.iosUserId);
     creatorLink.setAttribute("aria-label", `View @${creatorName} profile`);
     creatorLink.innerHTML = `${avatarMarkup(creator, creatorName, "clip-viewer-avatar")}<span>@${escapeHtml(creatorName)}</span>`;
-    previousButton.hidden = state.index === 0;
-    previousButton.disabled = state.index === 0;
-    nextButton.hidden = state.index === state.clips.length - 1;
-    nextButton.disabled = state.index === state.clips.length - 1;
     if (!state.pool) video.load();
     video.play().catch(function () {
       if (clipViewerState !== state || !video.hasAttribute("data-clip-viewer-video") || document.hidden) return;
@@ -3228,15 +3223,122 @@
   }
 
   function moveClipViewer(direction) {
-    if (!clipViewerState) {
-      return;
-    }
-    const nextIndex = clipViewerState.index + direction;
-    if (nextIndex < 0 || nextIndex >= clipViewerState.clips.length) {
-      return;
-    }
-    clipViewerState.index = nextIndex;
+    const state = clipViewerState;
+    if (!state || document.getElementById("videoReport")) return false;
+    const nextIndex = state.index + direction;
+    if (nextIndex < 0 || nextIndex >= state.clips.length) return false;
+    if (state.transition) state.transition.cancel();
+    const stage = state.overlay.querySelector(".clip-viewer-stage");
+    stage.style.transform = "";
+    state.index = nextIndex;
+    // Select and play in the gesture itself so mobile audio permission is retained.
     updateClipViewer();
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const animation = stage.animate([
+        { transform: `translate3d(0, ${direction * 18}%, 0)`, opacity: 0.65 },
+        { transform: "translate3d(0, 0, 0)", opacity: 1 }
+      ], { duration: 220, easing: "cubic-bezier(0.16, 1, 0.3, 1)" });
+      state.transition = animation;
+      animation.finished.catch(function () {}).then(function () {
+        if (state.transition === animation) {
+          state.transition = null;
+          if (state.alignClose) state.alignClose();
+        }
+      });
+    }
+    return true;
+  }
+
+  function bindClipViewerNavigation(state) {
+    const overlay = state.overlay;
+    const stage = overlay.querySelector(".clip-viewer-stage");
+    const close = overlay.querySelector("[data-clip-viewer-close]");
+    let gesture = null;
+    let suppressClickUntil = 0;
+    let wheelDistance = 0;
+    let wheelConsumed = false;
+    let wheelTimer = null;
+    const blocked = target => Boolean(target.closest("button, a, input, select, textarea, [data-feed-volume-control]"));
+    const active = () => clipViewerState === state && !document.getElementById("videoReport");
+    const resetDrag = () => { gesture = null; stage.style.transform = ""; alignClose(); };
+    stage.addEventListener("pointerdown", function (event) {
+      if (!event.isPrimary) { resetDrag(); return; }
+      if (!active() || event.pointerType === "mouse" || blocked(event.target)) return;
+      if (state.transition) state.transition.cancel();
+      gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, dragging: false };
+    });
+    stage.addEventListener("pointermove", function (event) {
+      if (!gesture || gesture.id !== event.pointerId || !active()) return;
+      const dx = event.clientX - gesture.x;
+      const dy = event.clientY - gesture.y;
+      if (!gesture.dragging) {
+        if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) { resetDrag(); return; }
+        if (Math.abs(dy) < 10 || Math.abs(dy) <= Math.abs(dx)) return;
+        gesture.dragging = true;
+        stage.setPointerCapture(event.pointerId);
+      }
+      event.preventDefault();
+      const atEdge = dy > 0 ? state.index === 0 : state.index === state.clips.length - 1;
+      const offset = Math.max(-160, Math.min(160, dy * (atEdge ? 0.15 : 0.45)));
+      stage.style.transform = `translate3d(0, ${offset}px, 0)`;
+    });
+    stage.addEventListener("pointerup", function (event) {
+      if (!gesture || gesture.id !== event.pointerId) return;
+      const dy = event.clientY - gesture.y;
+      const dx = event.clientX - gesture.x;
+      const dragging = gesture.dragging;
+      resetDrag();
+      if (!dragging) return;
+      suppressClickUntil = performance.now() + 400;
+      if (active() && Math.abs(dy) >= 48 && Math.abs(dy) > Math.abs(dx) * 1.2) {
+        moveClipViewer(dy < 0 ? 1 : -1);
+      }
+    });
+    stage.addEventListener("pointercancel", resetDrag);
+    stage.addEventListener("lostpointercapture", function (event) {
+      // The video's implicit touch capture ends when the stage takes over.
+      if (event.target === stage) resetDrag();
+    });
+    stage.addEventListener("click", function (event) {
+      if (event.detail !== 0 && performance.now() < suppressClickUntil && !blocked(event.target)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, true);
+    overlay.addEventListener("wheel", function (event) {
+      if (!active() || blocked(event.target) || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+      event.preventDefault();
+      clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(function () { wheelDistance = 0; wheelConsumed = false; }, 180);
+      if (wheelConsumed) return;
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? stage.clientHeight : 1;
+      wheelDistance += event.deltaY * unit;
+      if (Math.abs(wheelDistance) < 44) return;
+      wheelConsumed = true;
+      moveClipViewer(wheelDistance > 0 ? 1 : -1);
+    }, { passive: false });
+    const alignClose = function () {
+      const mute = overlay.querySelector("[data-feed-mute-toggle]");
+      if (!mute || clipViewerState !== state) return;
+      const rect = mute.getBoundingClientRect();
+      const top = rect.top + rect.height / 2 - overlay.getBoundingClientRect().top - close.offsetHeight / 2;
+      close.style.top = `${top}px`;
+    };
+    state.alignClose = alignClose;
+    const observer = new ResizeObserver(alignClose);
+    observer.observe(stage);
+    observer.observe(overlay);
+    window.addEventListener("resize", alignClose);
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", alignClose);
+    alignClose();
+    return function () {
+      clearTimeout(wheelTimer);
+      observer.disconnect();
+      window.removeEventListener("resize", alignClose);
+      if (window.visualViewport) window.visualViewport.removeEventListener("resize", alignClose);
+      if (state.transition) state.transition.cancel();
+      resetDrag();
+    };
   }
 
   function handleClipViewerKeydown(event) {
@@ -3249,12 +3351,12 @@
       closeClipViewer();
       return;
     }
-    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+    if (["ArrowUp", "ArrowDown", "PageUp", "PageDown"].includes(event.key)) {
       if (event.target.closest && event.target.closest("[data-feed-volume-control]")) {
         return;
       }
       event.preventDefault();
-      moveClipViewer(event.key === "ArrowLeft" ? -1 : 1);
+      moveClipViewer(event.key === "ArrowUp" || event.key === "PageUp" ? -1 : 1);
       return;
     }
     if (event.key !== "Tab") {
@@ -3297,9 +3399,6 @@
     overlay.setAttribute("aria-labelledby", "clipViewerTitle");
     overlay.innerHTML = `
       <button class="clip-viewer-close" type="button" data-clip-viewer-close aria-label="Close clip viewer"></button>
-      <button class="clip-viewer-arrow clip-viewer-arrow-previous" type="button" data-clip-viewer-previous aria-label="Previous clip">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
-      </button>
       <div class="clip-viewer-stage">
       <section class="clip-viewer-dialog">
         <video class="clip-viewer-video" data-clip-viewer-video playsinline loop preload="metadata" tabindex="0" role="button"></video>
@@ -3313,9 +3412,6 @@
         </div>
       </section>
       </div>
-      <button class="clip-viewer-arrow clip-viewer-arrow-next" type="button" data-clip-viewer-next aria-label="Next clip">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
-      </button>
     `;
     document.body.appendChild(overlay);
     clipViewerState = {
@@ -3353,14 +3449,13 @@
       }
     });
     overlay.querySelector("[data-clip-viewer-close]").addEventListener("click", function () { closeClipViewer(); });
-    overlay.querySelector("[data-clip-viewer-previous]").addEventListener("click", function () { moveClipViewer(-1); });
-    overlay.querySelector("[data-clip-viewer-next]").addEventListener("click", function () { moveClipViewer(1); });
     const viewerVideo = overlay.querySelector("[data-clip-viewer-video]");
     bindFeedVolumeControl(overlay, viewerVideo);
     if (clipViewerState.pool) viewerVideo.remove();
     else bindViewerVideo(viewerVideo, overlay);
     document.addEventListener("keydown", handleClipViewerKeydown);
     updateClipViewer();
+    clipViewerState.cleanupNavigation = bindClipViewerNavigation(clipViewerState);
     if (!socialState.loaded) loadSocialCollections();
     overlay.querySelector("[data-clip-viewer-close]").focus({ preventScroll: true });
   }

@@ -107,7 +107,7 @@ const http = require("node:http");
     // Saved and profile cards use the same viewer. Report the currently selected video.
     await page.goto(origin + "/#/saved");
     await page.locator('[data-view-clip="42"]').click();
-    await page.getByRole("button", { name: "Next clip", exact: true }).click();
+    await page.keyboard.press("ArrowDown");
     await page.locator(".clip-viewer-backdrop [data-report-clip]").click();
     await page.keyboard.press("Escape");
     assert.equal(await page.locator(".clip-viewer-backdrop").count(), 1);

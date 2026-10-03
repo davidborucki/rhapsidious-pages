@@ -21,7 +21,33 @@ const http = require("node:http");
   let browser;
   try {
     browser = await (process.env.BROWSER_ENGINE === "webkit" ? webkit : chromium).launch({ headless: true, executablePath: process.env.REPORT_BROWSER_PATH || undefined });
-    const page = await browser.newPage(process.env.BROWSER_ENGINE === "webkit" ? { ...devices["iPhone 13"] } : { viewport: { width: 390, height: 844 } });
+    const page = await browser.newPage(process.env.BROWSER_ENGINE === "webkit" ? { ...devices["iPhone 13"] } : { viewport: { width: 390, height: 844 }, hasTouch: true });
+    const touchSession = process.env.BROWSER_ENGINE === "webkit" ? null : await page.context().newCDPSession(page);
+    async function swipe(target, dx, dy, cancel = false) {
+      const box = await target.boundingBox();
+      const x = box.x + box.width * 0.35;
+      const y = box.y + box.height * 0.5;
+      if (touchSession) {
+        await touchSession.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+        for (let i = 1; i <= 6; i++) {
+          await touchSession.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + dx * i / 6, y: y + dy * i / 6 }] });
+        }
+        await touchSession.send("Input.dispatchTouchEvent", { type: cancel ? "touchCancel" : "touchEnd", touchPoints: [] });
+      } else {
+        // WebKit's driver exposes taps only; exercise pointer dispatch separately.
+        await target.evaluate((el, args) => {
+          const stage = el.closest(".clip-viewer-stage");
+          const capture = stage && stage.setPointerCapture;
+          if (stage) stage.setPointerCapture = () => {};
+          const options = { bubbles: true, cancelable: true, pointerType: "touch", pointerId: 123, isPrimary: true };
+          el.dispatchEvent(new PointerEvent("pointerdown", { ...options, clientX: args.x, clientY: args.y }));
+          el.dispatchEvent(new PointerEvent("pointermove", { ...options, clientX: args.x + args.dx, clientY: args.y + args.dy }));
+          el.dispatchEvent(new PointerEvent(args.cancel ? "pointercancel" : "pointerup", { ...options, clientX: args.x + args.dx, clientY: args.y + args.dy }));
+          if (stage) stage.setPointerCapture = capture;
+        }, { x, y, dx, dy, cancel });
+      }
+      await page.waitForTimeout(260);
+    }
     const failures = [];
     page.on("pageerror", error => failures.push(error.message));
     const requests = [];
@@ -59,10 +85,18 @@ const http = require("node:http");
       const viewer = page.locator(".clip-viewer-backdrop");
       const rail = viewer.locator(".feed-action-rail");
       await rail.waitFor();
+      assert.equal(await viewer.locator(".clip-viewer-arrow").count(), 0);
       const save = rail.locator("[data-save-clip]");
       await page.waitForFunction(() => !document.querySelector(".clip-viewer-backdrop [data-save-clip]").disabled);
       for (const [width, height] of [[320, 568], [390, 844], [1440, 900]]) {
         await page.setViewportSize({ width, height });
+        await page.waitForFunction(() => {
+          const mute = document.querySelector(".clip-viewer-backdrop [data-feed-mute-toggle]").getBoundingClientRect();
+          const close = document.querySelector("[data-clip-viewer-close]").getBoundingClientRect();
+          return Math.abs(mute.y + mute.height / 2 - close.y - close.height / 2) < 1;
+        });
+        const closeBox = await viewer.locator("[data-clip-viewer-close]").boundingBox();
+        assert.ok(Math.abs(closeBox.x + closeBox.width - (width - (width <= 760 ? 14 : 20))) < 1, "Close keeps its horizontal position");
         const geometry = await rail.evaluate(el => {
           const children = [...el.children];
           const boxes = children.map(c => c.getBoundingClientRect());
@@ -107,16 +141,35 @@ const http = require("node:http");
       await page.keyboard.press("Escape");
       assert.equal(await report.evaluate(el => document.activeElement === el), true);
       assert.equal(await report.evaluate(el => getComputedStyle(el).outlineColor), "rgb(255, 255, 255)");
-      await viewer.locator("[data-clip-viewer-next]").click();
+      const video = viewer.locator("[data-clip-viewer-video]");
+      // One trackpad gesture advances once even with a burst of wheel events.
+      await video.evaluate(el => {
+        for (let i = 0; i < 6; i++) el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 100 }));
+      });
+      assert.equal(await report.getAttribute("data-report-clip"), String(clipId + 1));
+      await page.waitForTimeout(260);
+      await video.evaluate(el => el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100 })));
+      await page.waitForTimeout(260);
+      assert.equal(await report.getAttribute("data-report-clip"), String(clipId));
+      // Short, horizontal, cancelled, and control gestures must not change clips.
+      await swipe(video, 0, 20);
+      await swipe(video, 100, 15);
+      await swipe(video, 0, -120, true);
+      await swipe(viewer.locator("[data-feed-mute-toggle]"), 0, -100);
+      await swipe(video, 0, 120); // already at the first clip
+      assert.equal(await report.getAttribute("data-report-clip"), String(clipId));
+      await swipe(video, 0, -120);
       assert.equal(await report.getAttribute("data-report-clip"), String(clipId + 1));
       assert.equal(await save.getAttribute("data-save-clip"), String(clipId + 1));
       assert.equal(await save.getAttribute("aria-pressed"), "false");
+      await swipe(video, 0, -120); // already at the last clip
+      assert.equal(await report.getAttribute("data-report-clip"), String(clipId + 1));
       await report.click();
       await page.locator("#reportReason").selectOption("OTHER");
       await page.getByRole("button", { name: "Submit", exact: true }).click();
       await page.locator("#videoReport").waitFor({ state: "detached" });
       await waitForRequest(r => r.path === `/clips/${clipId + 1}/reports`);
-      await viewer.locator("[data-clip-viewer-previous]").click();
+      await swipe(video, 0, 120);
       assert.equal(await rail.locator("[data-like-clip]").getAttribute("aria-pressed"), "true");
       assert.equal(await save.getAttribute("aria-pressed"), "true");
       await viewer.locator("[data-clip-viewer-close]").click();
@@ -129,6 +182,6 @@ const http = require("node:http");
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     assert.equal(await report.evaluate(el => el.matches(":focus-visible")), false);
     assert.deepEqual(failures, []);
-    console.log("Profile interaction checks passed: own/other profiles, exact stack order, responsive layout, Watch/Like/Save/Repost/Report, failed-save rollback, navigation state, report focus and pointer/keyboard dismissal.");
+    console.log("Profile interaction checks passed: own/other profiles, exact stack order, responsive layout, close/mute alignment, vertical swipes and boundaries, Watch/Like/Save/Repost/Report, failed-save rollback, navigation state, report focus and pointer/keyboard dismissal.");
   } finally { if (browser) await browser.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -48,7 +48,7 @@ test("profile and saved grids open an accessible keyboard-controlled clip viewer
   assert.match(appSource, /aria-modal/);
   assert.match(appSource, /event\.target === overlay/);
   assert.match(appSource, /event\.key === "Escape"/);
-  assert.match(appSource, /event\.key === "ArrowLeft" \|\| event\.key === "ArrowRight"/);
+  assert.match(appSource, /"ArrowUp", "ArrowDown", "PageUp", "PageDown"/);
   assert.match(appSource, /bindClipViewerLinks\(socialState\.savedClips\)/);
   assert.match(appSource, /bindClipViewerLinks\(activeCollection\)/);
   assert.doesNotMatch(viewer, /<video[^>]*\scontrols(?:\s|>)/);

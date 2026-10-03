@@ -8,6 +8,8 @@ const assert = require("node:assert/strict");
     const requests = [];
     let failUnblock = true;
     let failSupport = true;
+    let failDeletion = true;
+    let releaseDeletion;
     await page.route("https://dev-backend-withered-thunder-4589.fly.dev/**", async route => {
       const req = route.request();
       const path = new URL(req.url()).pathname;
@@ -18,6 +20,13 @@ const assert = require("node:assert/strict");
       if (path === "/me/blocked-users") body = [{ id: 2, username: "blocked_person" }];
       if (path === "/users/2/block" && failUnblock) status = 500;
       if (path === "/support/tickets" && failSupport) status = 500;
+      if (path === "/me/account") {
+        if (failDeletion) status = 500;
+        else {
+          await new Promise(resolve => { releaseDeletion = resolve; });
+          body = { status: "ok", accountDeleted: true };
+        }
+      }
       if (path === "/app/config") body = { privacyPolicyUrl: "https://example.com/privacy", termsOfServiceUrl: "https://example.com/terms" };
       await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     });
@@ -26,7 +35,11 @@ const assert = require("node:assert/strict");
     await page.getByRole("heading", { name: "Manage account", exact: true }).waitFor();
     assert.equal(await page.locator("#primaryNav").isVisible(), false);
     assert.equal(await page.locator(".site-header").isVisible(), true);
-    assert.equal(await page.getByRole("button", { name: "Deactivate account", exact: true }).isDisabled(), true);
+    await page.getByRole("button", { name: "Delete account", exact: true }).click();
+    await page.getByRole("heading", { name: "Delete account?", exact: true }).waitFor();
+    assert.ok(!requests.some(req => req.path === "/me/account"));
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    assert.ok(!requests.some(req => req.path === "/me/account"));
     for (const width of [390, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       const layout = await page.evaluate(() => {
@@ -62,6 +75,24 @@ const assert = require("node:assert/strict");
     await page.getByRole("heading", { name: "Message sent" }).waitFor();
     assert.equal(requests.filter(req => req.path === "/support/tickets").length, 2);
     assert.ok(!requests.some(req => /deactiv|\/account$/.test(req.path)));
-    console.log("Settings browser checks passed: mobile/tablet/desktop, navigation, legal links, unblock errors/success, support errors/success and draft retention.");
+    await page.getByRole("button", { name: "Manage account", exact: true }).click();
+    await page.getByRole("button", { name: "Delete account", exact: true }).click();
+    await page.getByRole("button", { name: "Delete account", exact: true }).click();
+    await page.getByText("Couldn’t delete your account. Please try again.").waitFor();
+    assert.equal(await page.evaluate(() => localStorage.getItem("voxxly_web_access_token")), "test-token");
+    failDeletion = false;
+    await page.getByRole("button", { name: "Delete account", exact: true }).click();
+    assert.equal(await page.getByRole("button", { name: "Deleting…", exact: true }).isDisabled(), true);
+    await page.locator("[data-delete-account]").dispatchEvent("click");
+    await page.evaluate(() => { window.location.hash = "#/profile"; });
+    await page.locator(".settings-page").waitFor({ state: "detached" });
+    assert.equal(requests.filter(req => req.path === "/me/account").length, 2);
+    assert.equal(typeof releaseDeletion, "function");
+    releaseDeletion();
+    await page.getByRole("heading", { name: "Log in to Voxxly", exact: true }).waitFor();
+    await page.getByText("Your account has been deleted.", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => localStorage.getItem("voxxly_web_access_token")), null);
+    assert.ok(requests.filter(req => req.path === "/me/account").every(req => req.method === "DELETE" && req.data === null));
+    console.log("Settings browser checks passed: responsive layouts, existing settings, deletion cancellation, failure/retry, duplicate clicks and sign-out after navigation.");
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

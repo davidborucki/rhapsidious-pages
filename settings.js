@@ -35,6 +35,9 @@
     let links = null;
     let loadingLinks = false;
     let linksError = "";
+    let confirmingDeletion = false;
+    let deleting = false;
+    let deletionError = "";
     let submitting = false;
     let submitted = false;
     let supportError = "";
@@ -60,8 +63,15 @@
       const title = sections.find(item => item[0] === selected)[1];
       let body = "";
       if (selected === "account") {
-        body = `<p class="settings-intro">Manage your Voxxly account.</p>
-          <div class="settings-item"><h2>Account deactivation</h2><p>Temporary deactivation isn’t available yet. Your account will stay active.</p><button class="secondary-button" disabled>Deactivate account</button><p class="settings-footnote">Deactivation is different from permanently deleting your account.</p></div>`;
+        body = `<div class="settings-item">
+          <h2>${confirmingDeletion ? "Delete account?" : "Delete account"}</h2>
+          <p>${confirmingDeletion ? "This can’t be undone." : "Permanently delete your account."}</p>
+          ${deletionError ? `<p class="settings-error" role="alert">${escape(deletionError)}</p>` : ""}
+          <div class="settings-actions">
+            ${confirmingDeletion ? `<button class="secondary-button" data-cancel-delete ${deleting ? "disabled" : ""}>Cancel</button>` : ""}
+            <button class="secondary-button settings-delete" data-delete-account ${deleting ? "disabled" : ""}>${deleting ? "Deleting…" : "Delete account"}</button>
+          </div>
+        </div>`;
       } else if (selected === "content") {
         body = `<p class="settings-intro">Manage mature and age-restricted content.</p>
           <div class="settings-item"><h2>Content preferences</h2><p>A personal setting for mature content isn’t available yet.</p><div class="settings-unavailable"><span>Hide mature content</span><span class="settings-badge">Not available yet</span></div><p class="settings-footnote">Existing server-side age restrictions still apply. This page does not override them.</p></div>`;
@@ -86,8 +96,7 @@
       } else {
         const url = links && legalUrl(links[selected === "privacy" ? "privacyPolicyUrl" : "termsOfServiceUrl"]);
         body = `<p class="settings-intro">${selected === "privacy" ? "Read how your information is collected, used and handled." : "Review the terms that apply when you use Voxxly."}</p>`;
-        if (loadingLinks) body += `<p class="muted" role="status">Loading…</p>`;
-        else if (url) body += `<a class="secondary-button" href="${escape(url)}" target="_blank" rel="noopener noreferrer">Open ${selected === "privacy" ? "privacy policy" : "terms of service"}<span class="sr-only"> (opens in a new tab)</span></a>`;
+        if (url) body += `<a class="secondary-button" href="${escape(url)}" target="_blank" rel="noopener noreferrer">Open ${selected === "privacy" ? "privacy policy" : "terms of service"}<span class="sr-only"> (opens in a new tab)</span></a>`;
         else body += `<p class="settings-error" role="alert">${escape(linksError || "This document’s link hasn’t been configured yet.")}</p><button class="secondary-button" data-retry="links">Try again</button>`;
       }
       detail.innerHTML = `<h1 id="settingsTitle" tabindex="-1">${title}</h1>${body}`;
@@ -116,6 +125,37 @@
       finally { loadingLinks = false; if (active && ["privacy", "terms"].includes(selected)) render(); }
     }
     function bindDetail() {
+      const deleteButton = detail.querySelector("[data-delete-account]");
+      if (deleteButton) deleteButton.addEventListener("click", async function () {
+        if (deleting) return;
+        if (!confirmingDeletion) {
+          confirmingDeletion = true;
+          render();
+          detail.querySelector("[data-cancel-delete]").focus();
+          return;
+        }
+        deleting = true;
+        deletionError = "";
+        render();
+        try {
+          await request("/me/account", { method: "DELETE" });
+          // Deletion still signs out this session if the user left Settings while waiting.
+          options.onAccountDeleted();
+        } catch (_) {
+          deletionError = "Couldn’t delete your account. Please try again.";
+        } finally {
+          deleting = false;
+          if (active && selected === "account") render(true);
+        }
+      });
+      const cancelDelete = detail.querySelector("[data-cancel-delete]");
+      if (cancelDelete) cancelDelete.addEventListener("click", function () {
+        if (deleting) return;
+        confirmingDeletion = false;
+        deletionError = "";
+        render();
+        detail.querySelector("[data-delete-account]").focus();
+      });
       detail.querySelectorAll("[data-retry]").forEach(button => button.addEventListener("click", () => button.dataset.retry === "blocked" ? loadBlocked() : loadLinks()));
       detail.querySelectorAll("[data-unblock]").forEach(button => button.addEventListener("click", async function () {
         const id = button.dataset.unblock;
@@ -162,6 +202,7 @@
       });
     }
     host.querySelectorAll("[data-section]").forEach(button => button.addEventListener("click", function () {
+      if (!deleting) { confirmingDeletion = false; deletionError = ""; }
       selected = button.dataset.section;
       render(true);
       if (selected === "blocked" && blocked === null && !blockedError) loadBlocked();

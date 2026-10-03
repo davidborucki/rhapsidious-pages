@@ -5,6 +5,8 @@ uses a 29% left column on desktop and stacks above the detail panel at 700px.
 
 Connected to the existing backend contracts:
 
+- `DELETE /me/account` → permanently delete the signed-in account, then clear the
+  local session and return to login. A second click confirms; Cancel sends no request.
 - `GET /me/blocked-users` → array of `id`, `username`, `profilePhotoUrl`.
 - `DELETE /users/{userId}/block` → unblock the selected account.
 - `POST /support/tickets` → JSON `category`, `message`, `email`.
@@ -16,15 +18,14 @@ Connected to the existing backend contracts:
 No policy text is fabricated or copied into the application. Missing links and
 network failures display a retry state. Support errors retain the draft, and
 failed unblocks leave the account in the list. Requests are authenticated using
-the existing web request helper. Responses are ignored after leaving Settings.
+the existing web request helper. View updates are ignored after leaving Settings. Successful account deletion still
+clears the original session after navigation, but never clears a newer session.
 
 ## Backend work still required
 
 Temporary account deactivation and a per-user mature-content preference have no
-endpoints in the inspected backend. Their settings sections explicitly show
-that they are unavailable. They do not send requests or save misleading local
-preferences. The existing permanent account deletion API is deliberately not
-used as a substitute for temporary deactivation. Existing server age checks
+endpoints in the inspected backend. The account panel offers permanent deletion; the mature-content panel shows
+that its preference is unavailable. No temporary deactivation request is sent. Existing server age checks
 are unchanged.
 
 ## Verification
@@ -38,4 +39,5 @@ are unchanged.
 
 The browser test mocks backend responses: it never unblocks real users or sends
 real support tickets. It checks 390px, 768px and 1440px layouts, hidden app
-navigation, legal links, support drafts, errors and successful mutations.
+navigation, legal links, support drafts, errors and successful mutations. Account
+deletion checks cover cancellation, retry, duplicate clicks and session cleanup.

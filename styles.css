@@ -2758,6 +2758,8 @@ html.clip-viewer-open body {
 .settings-footnote { color: var(--muted); font-size: .85rem; line-height: 1.5; }
 .settings-unavailable { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0; }
 .settings-badge { font-size: .75rem; border-radius: 999px; padding: 6px 10px; background: #25252e; color: var(--muted); }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.settings-delete { color: var(--danger); }
 .settings-error { color: #FF655C; line-height: 1.5; }
 .settings-users { padding: 0; margin: 0; list-style: none; }
 .settings-users li { display: flex; align-items: center; gap: 14px; padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,.08); }

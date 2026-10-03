@@ -4344,6 +4344,13 @@
       request: requestJson,
       escape: escapeHtml,
       avatar: avatarMarkup,
+      onAccountDeleted: function () {
+        if (generation !== sessionGeneration) return;
+        pendingProtectedHash = "";
+        clearSession();
+        authNotice = { type: "success", message: "Your account has been deleted." };
+        navigate(routes.login);
+      },
       onUnblock: function () {
         if (generation !== sessionGeneration) return;
         invalidateBlockedContent();

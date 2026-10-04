@@ -1206,7 +1206,7 @@
 
   function clipModalOpen() { return document.getElementById("videoReport") || document.getElementById("clipTools") || document.getElementById("repostDetails"); }
 
-  function openClipTools(clipId, trigger) {
+  function openClipTools(clipId, trigger, keyboardTriggered = false) {
     const clip = findKnownClip(clipId) || (clipViewerState && clipViewerState.clips.find(item => String(item.id) === String(clipId)));
     if (!clip || !currentUser || String(clip.iosUserId) !== String(currentUser.id) || clipModalOpen()) return;
     const generation = sessionGeneration;
@@ -1221,7 +1221,10 @@
     function dismiss(restorePlayback = true) {
       if (busy) return;
       dialog.close(); dialog.remove();
-      if (trigger.isConnected) trigger.focus({ preventScroll: true });
+      if (trigger.isConnected) {
+        if (keyboardTriggered) trigger.focus({ preventScroll: true });
+        else trigger.blur();
+      }
       if (restorePlayback && resume && video.isConnected && generation === sessionGeneration && !document.hidden) video.play().catch(() => {});
     }
     const icons = {
@@ -1424,7 +1427,7 @@
     return `<button type="button" class="repost-attribution" data-repost-attribution="${escapeHtml(item.id)}" aria-haspopup="dialog">${escapeHtml(label)}</button>`;
   }
 
-  async function openRepostAttribution(clipId, trigger) {
+  async function openRepostAttribution(clipId, trigger, keyboardTriggered = false) {
     document.getElementById("repostDetails")?.close();
     const clip = findKnownClip(clipId);
     if (!clip) return;
@@ -1446,7 +1449,10 @@
     });
     dialog.addEventListener("close", () => {
       dialog.remove(); window.removeEventListener("hashchange", close);
-      if (trigger.isConnected) trigger.focus({ preventScroll: true });
+      if (trigger.isConnected) {
+        if (keyboardTriggered) trigger.focus({ preventScroll: true });
+        else trigger.blur();
+      }
     }, { once: true });
     window.addEventListener("hashchange", close);
     dialog.showModal();
@@ -1635,12 +1641,12 @@
     root.querySelectorAll("[data-repost-attribution]").forEach(button => {
       if (button.dataset.actionBound === "true") return;
       button.dataset.actionBound = "true";
-      button.addEventListener("click", event => { event.stopPropagation(); openRepostAttribution(button.dataset.repostAttribution, button); });
+      button.addEventListener("click", event => { event.stopPropagation(); openRepostAttribution(button.dataset.repostAttribution, button, event.detail === 0); });
     });
     root.querySelectorAll("[data-more-clip]").forEach(button => {
       if (button.dataset.actionBound === "true") return;
       button.dataset.actionBound = "true";
-      button.addEventListener("click", () => openClipTools(button.dataset.moreClip, button));
+      button.addEventListener("click", event => openClipTools(button.dataset.moreClip, button, event.detail === 0));
     });
     root.querySelectorAll("[data-report-clip]").forEach(function (button) {
       if (button.dataset.actionBound === "true") return;

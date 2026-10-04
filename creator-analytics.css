@@ -100,4 +100,4 @@
 .chart-scrubber::-webkit-slider-thumb { appearance:none;width:8px;height:8px;margin-top:-3px;border:0;border-radius:50%;background:var(--orange); }
 .chart-scrubber::-moz-range-track { height:2px;background:var(--line-strong); }
 .chart-scrubber::-moz-range-thumb { width:8px;height:8px;border:0;border-radius:50%;background:var(--orange); }
-.clip-tools h2 { outline:none; }
+.clip-tools h2[tabindex="-1"]:focus { outline: none; }

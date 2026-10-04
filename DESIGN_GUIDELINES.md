@@ -73,9 +73,9 @@ Keep errors specific and actionable. Put genuinely useful secondary explanations
 ### Native navigation
 
 - The Voxxly/avatar/Log out header is web-only. Do not add it to signed-in iOS screens.
-- iOS uses a flat bottom bar anchored to the bottom safe area, without a floating card: **Soundbytes, Search, Upload, Profile**. Saved clips are under **Profile → Settings → Saved clips**.
+- iOS uses a flat bottom bar anchored to the bottom safe area, without a floating card: **Soundbytes, Search, Saved, Upload, Profile**. Hide the bar while the keyboard is visible.
 - Profile and Saved videos push from the right and return to their source page on a rightward swipe. Do not present these viewers as bottom sheets.
-- Animate Posts/Reposts selection and respect Reduce Motion. Tapping blank Search space dismisses the keyboard without interfering with profile links.
+- Animate only the Posts/Reposts indicator briefly; switch the grid immediately and respect Reduce Motion. Tapping blank Search space dismisses the keyboard without interfering with profile links.
 
 ### Settings
 
@@ -89,7 +89,8 @@ Keep errors specific and actionable. Put genuinely useful secondary explanations
 - Order: Watch when available, Profile, Like, Save, Repost, then Report for another user's clip. **More** appears for owned clips only when viewing the signed-in user's profile; never on Soundbytes or Saved.
 - Use white icons by default. Selected Like is `#ff453a`, Save `#f47604`, and Repost `#ffc107`, including labels. Watch uses the shared red/yellow popcorn artwork. More uses three dots.
 - On web, align close and mute controls with symmetric insets. Native iOS uses system volume and has no on-screen volume changer.
-- Repost attribution is text without a people icon. Open a small dismissible popup with the reposter's avatar, bold name, and “reposted this soundbyte”; avatar/name link to their profile.
+- Repost attribution is text without a people icon. Open a small, centered dismissible popup with the reposter's avatar, bold name, and “reposted this soundbyte”; avatar/name link to their profile.
+- Portrait videos fill the Soundbytes viewport edge to edge. Fit landscape videos without cropping.
 - Keep controls visible and anchored correctly through swipes, loading, transitions, and browser viewport changes.
 - Navigate profile videos with vertical touch and trackpad gestures, without previous/next arrow buttons. Handle momentum without blocking the next deliberate gesture.
 - Open report dialogs with the reason picker closed; the user chooses when to open it.

@@ -1,7 +1,7 @@
 "use strict";
 // NODE_PATH=<Playwright runtime> node tests/video-report.browser.cjs
 // Serves this checkout locally; all backend calls are intercepted.
-const { chromium } = require("playwright");
+const chromium = require("playwright")[process.env.BROWSER_ENGINE === "webkit" ? "webkit" : "chromium"];
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");

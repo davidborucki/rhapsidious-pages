@@ -113,7 +113,7 @@ const assert = require("node:assert/strict");
     assert.equal(requests.filter(req => req.path === "/me/account").length, 2);
     assert.equal(typeof releaseDeletion, "function");
     releaseDeletion();
-    await page.getByRole("heading", { name: "Log in to Voxxly", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "Your next good listen.", exact: true }).waitFor();
     await page.getByText("Your account has been deleted.", { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => localStorage.getItem("voxxly_web_access_token")), null);
     assert.ok(requests.filter(req => req.path === "/me/account").every(req => req.method === "DELETE" && req.data === null));

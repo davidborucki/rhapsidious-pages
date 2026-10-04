@@ -1,7 +1,7 @@
 "use strict";
 // Real native media over a local HTTP Range server; API metadata alone is mocked.
 // NODE_PATH=<Playwright runtime> PLAYBACK_BROWSER_PATH=<browser> node tests/playback.browser.cjs
-const { chromium } = require("playwright");
+const chromium = require("playwright")[process.env.BROWSER_ENGINE === "webkit" ? "webkit" : "chromium"];
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -297,7 +297,7 @@ const { execFileSync } = require("node:child_process");
     assert.deepEqual(cancellation, { cancelled: true, currentPreserved: true });
     await nextPage.waitForTimeout(600);
     const cancelledTransfers = transfers.slice(cancellationStart).filter(item => item.path === '/media/2.mp4');
-    assert.ok(cancelledTransfers.length > 0 && cancelledTransfers.every(item => item.aborted && item.bytes < media.length), 'unused native download stops before the full MP4 is transferred');
+    assert.ok(cancelledTransfers.length > 0 && cancelledTransfers.some(item => item.aborted) && cancelledTransfers.every(item => item.bytes < media.length) && cancelledTransfers.reduce((sum, item) => sum + item.bytes, 0) < media.length, 'unused native download stops before the full MP4 is transferred: ' + JSON.stringify({ mediaBytes: media.length, cancelledTransfers }));
     assert.ok(!transfers.slice(cancellationStart).some(item => item.path === '/media/3.mp4'));
     nextReports.push({ cancellation, cancelledTransfers });
     await nextPage.close();

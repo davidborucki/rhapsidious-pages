@@ -102,6 +102,7 @@
   }
 
   function embeddedCreator(clip) {
+    if (currentUser && String(currentUser.id) === String(clip.iosUserId)) return currentUser;
     const creator = clip.creator;
     return creator && String(creator.id) === String(clip.iosUserId) && typeof creator.username === "string" ? creator : null;
   }
@@ -4191,7 +4192,6 @@
     const generation = sessionGeneration;
     const user = profileState.user || currentUser;
     let original = user.username || "";
-    const originalName = user.displayName || original;
     let photo = null;
     let preview = "";
     let busy = false;
@@ -4208,9 +4208,6 @@
       <form class="profile-editor-form">
         <div id="editPhotoPreview">${avatarMarkup(user, original, "profile-avatar")}</div>
         <label class="secondary-button profile-photo-picker">Change profile picture<input id="editPhoto" type="file" accept="image/jpeg,image/png,image/webp" class="sr-only"></label>
-        <label for="editName">Name</label>
-        <input id="editName" type="text" autocomplete="name" value="${escapeHtml(originalName)}" aria-describedby="editNameStatus">
-        <p id="editNameStatus" class="muted" role="status" aria-live="polite">Valid name</p>
         <label for="editUsername">@username</label>
         <input id="editUsername" type="text" autocomplete="username" spellcheck="false" value="${escapeHtml(original)}" aria-describedby="editUsernameStatus">
         <p id="editUsernameStatus" class="muted" role="status" aria-live="polite">Current username</p>
@@ -4219,21 +4216,14 @@
       </form>`;
     document.body.appendChild(dialog);
     const input = dialog.querySelector("#editUsername");
-    const nameInput = dialog.querySelector("#editName");
     const apply = dialog.querySelector("#applyProfile");
     const error = dialog.querySelector("#editProfileError");
     const photoInput = dialog.querySelector("#editPhoto");
     const active = function () { return dialog.isConnected && generation === sessionGeneration && currentUser && String(currentUser.id) === String(userId); };
     const update = function () {
-      const validName = window.ProfileEditor.isValidName(nameInput.value);
-      nameInput.setAttribute("aria-invalid", String(!validName));
-      const nameLength = Array.from(nameInput.value).length;
-      const nameStatus = dialog.querySelector("#editNameStatus");
-      nameStatus.textContent = (nameInput.value.trim() ? "" : "Enter a name · ") + nameLength + "/32 character limit";
-      nameStatus.classList.toggle("is-over-limit", nameLength > 32);
-      apply.disabled = busy || preparing || !validName || !["available", "unchanged"].includes(availability);
+      apply.disabled = busy || preparing || !["available", "unchanged"].includes(availability);
       apply.textContent = busy ? "Applying…" : "Apply";
-      input.disabled = nameInput.disabled = photoInput.disabled = busy;
+      input.disabled = photoInput.disabled = busy;
       dialog.querySelector(".clip-viewer-close").disabled = busy;
     };
     let checker;
@@ -4262,7 +4252,6 @@
     dialog.querySelector(".clip-viewer-close").addEventListener("click", function () { if (!busy) dialog.dismiss(); });
     dialog.addEventListener("cancel", function (event) { event.preventDefault(); if (!busy) dialog.dismiss(); });
     input.addEventListener("input", function () { error.textContent = ""; checker.check(input.value); });
-    nameInput.addEventListener("input", function () { error.textContent = ""; update(); });
     photoInput.addEventListener("change", async function () {
       const file = photoInput.files[0];
       if (!file) return;
@@ -4295,13 +4284,8 @@
       event.preventDefault();
       if (apply.disabled || !active()) return;
       // Applying an unchanged profile is a local dismiss, never an API call.
-      if (nameInput.value.trim() === originalName && input.value.trim() === original && !photo) {
+      if (input.value.trim() === original && !photo) {
         dialog.dismiss();
-        return;
-      }
-      // Do not silently discard an independent name until the backend supports it.
-      if (nameInput.value.trim() !== originalName) {
-        error.textContent = "Saving a separate name needs a backend update. Your changes have not been sent.";
         return;
       }
       busy = true;

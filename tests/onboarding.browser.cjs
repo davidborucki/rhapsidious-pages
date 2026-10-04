@@ -39,7 +39,7 @@ const http = require("node:http");
       requests.push({ pathname, body: req.postDataJSON(), headers: req.headers() });
       let status = 200, body = [];
       if (pathname === "/auth/login") { status = loginError ? 401 : 200; body = loginError ? {} : { accessToken: "fixture", refreshToken: "fixture-refresh" }; }
-      else if (pathname === "/auth/me") body = { id: 1, username: "listener" };
+      else if (pathname === "/auth/me") body = { id: 1, username: "listener", emailConfirmed: true };
       else if (pathname === "/ios/users") { status = signupError ? 409 : 200; body = { id: 1 }; }
       else if (pathname === "/auth/password/forgot") { if (holdMail) await holdMail; status = mailError ? 503 : 200; body = { ok: true }; }
       else if (pathname === "/auth/password/validate") { status = invalid ? 400 : 200; body = { ok: true }; }

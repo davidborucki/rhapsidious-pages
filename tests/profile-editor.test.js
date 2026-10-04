@@ -11,7 +11,7 @@ test("unchanged Apply dismisses before reaching any backend request", () => {
   const source = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
   const start = source.indexOf('dialog.querySelector("form").addEventListener("submit"', source.indexOf("function openProfileEditor()"));
   const submit = source.slice(start, source.indexOf("dialog.showModal()", start));
-  const guard = 'if (nameInput.value.trim() === originalName && input.value.trim() === original && !photo)';
+  const guard = 'if (input.value.trim() === original && !photo)';
   assert.ok(submit.indexOf(guard) >= 0);
   assert.ok(submit.indexOf(guard) < submit.indexOf("await requestJson"));
   assert.match(submit.slice(submit.indexOf(guard)), /\{\s*dialog\.dismiss\(\);\s*return;/);

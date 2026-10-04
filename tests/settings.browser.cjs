@@ -8,6 +8,7 @@ const assert = require("node:assert/strict");
   try {
     const page = await browser.newPage(isWebkit ? devices["iPhone 13"] : { viewport: { width: 390, height: 844 }, hasTouch: true });
     const requests = [];
+    let preferredSource = "YOUTUBE", failSource = false;
     let failUnblock = true;
     let failDeletion = true;
     let releaseDeletion;
@@ -17,7 +18,11 @@ const assert = require("node:assert/strict");
       requests.push({ path, method: req.method(), data: req.postData() });
       let body = {};
       let status = 200;
-      if (path === "/auth/me") body = { id: 1, username: "dave", email: "dave@example.com" };
+      if (path === "/auth/me") body = { id: 1, username: "dave", email: "dave@example.com", preferredSource };
+      if (path === "/me/source-preferences") {
+        if (failSource) status = 500;
+        else { preferredSource = JSON.parse(req.postData()).preferredSource; body = { preferredSource }; }
+      }
       if (path === "/me/blocked-users") body = [{ id: 2, username: "blocked_person" }];
       if (path === "/users/2/block" && failUnblock) status = 500;
       if (path === "/me/account") {
@@ -33,7 +38,7 @@ const assert = require("node:assert/strict");
     await page.addInitScript(() => localStorage.setItem("voxxly_web_access_token", "test-token"));
     await page.goto(origin + "/#/settings");
     await page.getByRole("heading", { name: "Settings", exact: true }).waitFor();
-    assert.equal(await page.locator("[data-section]").count(), 7);
+    assert.equal(await page.locator("[data-section]").count(), 8);
     assert.equal(await page.locator(".settings-detail").isVisible(), false);
     assert.ok(!requests.some(req => req.path === "/me/blocked-users"));
     async function openSection(name) {
@@ -43,6 +48,19 @@ const assert = require("node:assert/strict");
       await page.getByRole("heading", { name, exact: true }).waitFor();
       assert.equal(await page.locator(".settings-home").isVisible(), false);
     }
+    await openSection("Source preferences");
+    assert.equal(await page.getByRole("button", { name: "YouTube", exact: true }).getAttribute("aria-pressed"), "true");
+    await page.getByRole("button", { name: "Spotify", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-source-preference="SPOTIFY"]').getAttribute("aria-pressed") === "true");
+    if (process.env.SETTINGS_SCREENSHOT_DIR) await page.screenshot({ path: require("node:path").join(process.env.SETTINGS_SCREENSHOT_DIR, `sources-${isWebkit ? "webkit" : "chromium"}.png`) });
+    failSource = true;
+    await page.getByRole("button", { name: "YouTube", exact: true }).click();
+    await page.getByText("Couldn’t save. Try again.").waitFor();
+    assert.equal(await page.getByRole("button", { name: "Spotify", exact: true }).getAttribute("aria-pressed"), "true");
+    failSource = false;
+    await page.reload();
+    await page.getByRole("button", { name: "Spotify", exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Spotify", exact: true }).getAttribute("aria-pressed"), "true");
     await openSection("Manage account");
     assert.equal(await page.locator("#primaryNav").isVisible(), false);
     assert.equal(await page.locator(".site-header").isVisible(), true);
@@ -62,7 +80,7 @@ const assert = require("node:assert/strict");
       }));
       assert.equal(layout.overflow, false);
       assert.equal(layout.detailHidden, true);
-      assert.equal(layout.rows, 7);
+      assert.equal(layout.rows, 8);
       if (process.env.SETTINGS_SCREENSHOT_DIR) await page.screenshot({ path: require("node:path").join(process.env.SETTINGS_SCREENSHOT_DIR, "voxxly-settings-" + width + ".png"), fullPage: true });
     }
     await page.getByRole("searchbox", { name: "Search settings" }).fill("privacy");

@@ -38,7 +38,9 @@
           "id": 45,
           "username": "example",
           "profilePhotoUrl": "https://images.rhapsidious.com/example.jpg"
-        }
+        },
+        "youtubeUrl": null,
+        "spotifyUrl": null
       }
     }
   ]

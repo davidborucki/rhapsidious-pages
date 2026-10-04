@@ -102,7 +102,7 @@ const http = require("node:http");
     const requests = [];
     let failSave = false;
     let clipCount = 2;
-    const clipsFor = userId => Array.from({ length: clipCount }, (_, i) => i).map(i => ({ id: userId * 10 + i, iosUserId: userId, name: `Video ${userId * 10 + i}`, fullEpisodeFilepath: `https://example.test/episode/${userId * 10 + i}`, creator: { id: userId, username: `creator${userId}` } }));
+    const clipsFor = userId => Array.from({ length: clipCount }, (_, i) => i).map(i => ({ id: userId * 10 + i, iosUserId: userId, name: `Video ${userId * 10 + i}`, youtubeUrl: "https://youtu.be/abc123", spotifyUrl: "https://open.spotify.com/episode/abc123", fullEpisodeFilepath: `https://example.test/episode/${userId * 10 + i}`, creator: { id: userId, username: `creator${userId}` } }));
     const waitForRequest = async predicate => {
       for (let i = 0; i < 100; i++) {
         if (requests.some(predicate)) return;
@@ -115,7 +115,7 @@ const http = require("node:http");
       const bodyIn = req.postData() ? JSON.parse(req.postData()) : null;
       requests.push({ path: url.pathname, method: req.method(), body: bodyIn });
       let body = [], status = 200;
-      if (url.pathname === "/auth/me") body = { id: 1, username: "creator1" };
+      if (url.pathname === "/auth/me") body = { id: 1, username: "creator1", preferredSource: "SPOTIFY" };
       else if (/^\/ios\/users\/[12]$/.test(url.pathname)) { const id = Number(url.pathname.split("/").pop()); body = { id, username: `creator${id}` }; }
       else if (/^\/ios\/users\/[12]\/clips$/.test(url.pathname)) body = clipsFor(Number(url.pathname.split("/")[3]));
       else if (/^\/ios\/users\/[12]\/(followers|following)$/.test(url.pathname)) body = [{ id: 2, username: "creator2" }];
@@ -160,6 +160,7 @@ const http = require("node:http");
       }
       await page.setViewportSize({ width: 390, height: 844 });
       assert.equal(await rail.locator(".feed-avatar-link").getAttribute("href"), `#/profile?userId=${userId}`);
+      assert.equal(await rail.locator("[data-full-episode]").getAttribute("href"), "https://open.spotify.com/episode/abc123");
       await rail.locator("[data-full-episode]").evaluate(a => { a.addEventListener("click", e => e.preventDefault(), { once: true }); a.click(); });
       await waitForRequest(r => r.body && r.body.clipId === clipId && r.body.hasClickedToFullEpisode);
       await rail.locator("[data-like-clip]").click();

@@ -41,7 +41,7 @@ const { execFileSync } = require("node:child_process");
       else if (url.pathname === "/iosclips" && req.method() === "POST") {
         const payload = req.postDataBuffer().toString("utf8");
         const field = name => { const match = payload.match(new RegExp('name="' + name + '"\\r\\n\\r\\n([^\\r]*)')); return match && match[1]; };
-        const upload = { title: field("name"), host: field("host"), guests: field("guestCsv"), userId: field("iosUserId"), contentType: req.headers()["content-type"] };
+        const upload = { youtubeUrl: field("youtubeUrl"), spotifyUrl: field("spotifyUrl"), title: field("name"), host: field("host"), guests: field("guestCsv"), userId: field("iosUserId"), contentType: req.headers()["content-type"] };
         uploads.push(upload);
         if (waitUpload) await waitUpload;
         if (denied) { status = 403; body = { message: "Forbidden" }; }
@@ -94,7 +94,7 @@ const { execFileSync } = require("node:child_process");
     await page.waitForFunction(() => document.querySelector(".upload-preview video")?.readyState >= 1);
     await page.waitForFunction(() => document.querySelector(".upload-preview video")?.poster.startsWith("data:image/jpeg"));
     assert.equal(await page.locator("[data-upload-title]").inputValue(), "Morning conversations");
-    assert.equal(await page.locator(".upload-details").getAttribute("open"), null);
+    assert.equal(await page.locator(".upload-details:not(.episode-upload)").getAttribute("open"), null);
     assert.equal(await page.locator(".progress-wrap").count(), 0);
     await page.locator("[data-preview-upload]").click();
     await page.waitForFunction(() => !document.querySelector(".upload-preview video").paused);
@@ -112,9 +112,19 @@ const { execFileSync } = require("node:child_process");
     assert.equal(await page.locator("[data-upload-title]").first().inputValue(), "A better morning");
     await page.getByRole("button", { name: "Remove Another video.mp4", exact: true }).click();
     assert.equal(await page.locator(".upload-item").count(), 1);
-    await page.locator(".upload-details summary").click();
+    await page.locator(".upload-details:not(.episode-upload) summary").click();
     await page.locator("#uploadHost").fill("Dave");
     await page.locator("#uploadGuests").fill(" Alex, , Sam ");
+    await page.locator(".episode-upload summary").click();
+    await page.locator('[data-source-provider="YOUTUBE"]').fill("https://youtube.com.evil.test/watch?v=abc");
+    await page.locator("#uploadSubmit").click();
+    assert.equal(uploads.length, 0);
+    await page.locator('[data-source-provider="YOUTUBE"]').fill("https://www.youtube.com/watch?v=abc123");
+    await page.locator('[data-source-provider="SPOTIFY"]').fill("https://open.spotify.com/episode/abc123");
+    for (const width of [320, 390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 844 }); await checkLayout(); await screenshot(`sources-${width}`);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
     await screenshot("optional-details");
     // Drafts and files survive leaving the page.
     await page.goto(origin + "/#/profile");
@@ -139,7 +149,7 @@ const { execFileSync } = require("node:child_process");
     waitUpload = null; release();
     await page.getByRole("heading", { name: "Uploaded", exact: true }).waitFor();
     assert.equal(uploads.length, 1);
-    assert.deepEqual({ ...uploads[0], contentType: undefined }, { title: "A better morning", host: "Dave", guests: "Alex,Sam", userId: "1", contentType: undefined });
+    assert.deepEqual({ ...uploads[0], contentType: undefined }, { youtubeUrl: "https://www.youtube.com/watch?v=abc123", spotifyUrl: "https://open.spotify.com/episode/abc123", title: "A better morning", host: "Dave", guests: "Alex,Sam", userId: "1", contentType: undefined });
     assert.match(uploads[0].contentType, /^multipart\/form-data; boundary=/);
     await page.getByText("Your soundbite is ready.", { exact: true }).waitFor();
     await checkLayout(); await screenshot("complete");

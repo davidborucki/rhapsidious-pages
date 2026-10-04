@@ -3,6 +3,7 @@
   const sections = [
     ["account", "Manage account"],
     ["analytics", "View analytics"],
+    ["sources", "Source preferences"],
     ["blocked", "Blocked users"],
     ["content", "Age-restricted content"],
     ["support", "Contact support"],
@@ -27,6 +28,9 @@
     const escape = options.escape;
     const request = options.request;
     const user = options.user;
+    let sourceSaving = false;
+    let sourceError = "";
+    let preferredSource = user.preferredSource || "YOUTUBE";
     let active = true;
     let selected = null;
     let searchQuery = "";
@@ -46,6 +50,7 @@
     let supportError = "";
     const draft = { category: "ACCOUNT_ISSUE", message: "", email: user.email || "" };
     const paths = {
+      sources: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3Z"/>',
       analytics: '<path d="M4 3v17h17M8 15v-4m5 4V6m5 9V9"/>',
       account: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',
       blocked: '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
@@ -63,7 +68,7 @@
     const externalUrl = id => legalUrl(links && links[externalSections[id].key])
       || new URL(externalSections[id].path, window.location.href).href;
     const groups = [
-      ["Your account", ["account", "analytics"]],
+      ["Your account", ["account", "analytics", "sources"]],
       ["Privacy and content", ["blocked", "content"]],
       ["Support and about", ["support", "privacy", "terms"]]
     ];
@@ -136,6 +141,8 @@
             <button class="secondary-button settings-delete" data-delete-account ${deleting ? "disabled" : ""}>${deleting ? "Deleting…" : "Delete account"}</button>
           </div>
         </div>`;
+      } else if (selected === "sources") {
+        body = `<p class="settings-intro">Open full episodes on</p><div class="episode-preferences" role="group" aria-label="Preferred episode source">${["YOUTUBE", "SPOTIFY"].map(provider => `<button class="episode-preference" type="button" data-source-preference="${provider}" aria-pressed="${preferredSource === provider}" ${sourceSaving ? "disabled" : ""}>${window.VoxxlyEpisodeSources.logo(provider)}<span>${window.VoxxlyEpisodeSources.names[provider]}</span><span class="source-check" aria-hidden="true">${preferredSource === provider ? "✓" : ""}</span></button>`).join("")}</div>${sourceError ? `<p class="settings-error" role="alert">${escape(sourceError)}</p>` : ""}`;
       } else if (selected === "content") {
         body = `<p class="settings-intro">Manage mature and age-restricted content.</p>
           <div class="settings-item"><h2>Content preferences</h2><p>A personal setting for mature content isn’t available yet.</p><div class="settings-unavailable"><span>Hide mature content</span><span class="settings-badge">Not available yet</span></div><p class="settings-footnote">Existing server-side age restrictions still apply. This page does not override them.</p></div>`;
@@ -197,6 +204,18 @@
       }
     }
     function bindDetail() {
+      detail.querySelectorAll("[data-source-preference]").forEach(button => button.addEventListener("click", async () => {
+        if (sourceSaving) return;
+        const value = button.dataset.sourcePreference;
+        sourceSaving = true; sourceError = ""; render();
+        try {
+          const result = await request("/me/source-preferences", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preferredSource: value }) });
+          if (result.preferredSource !== value) throw new Error("Unexpected preference");
+          preferredSource = value;
+          options.onSourceChanged(value);
+        } catch (_) { sourceError = "Couldn’t save. Try again."; }
+        finally { sourceSaving = false; if (active && selected === "sources") { render(); detail.querySelector(`[data-source-preference="${value}"]`).focus({ preventScroll: true }); } }
+      }));
       const deleteButton = detail.querySelector("[data-delete-account]");
       if (deleteButton) deleteButton.addEventListener("click", async function () {
         if (deleting) return;

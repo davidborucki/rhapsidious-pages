@@ -1404,7 +1404,7 @@
 
   function renderClipActionRail(item, creator, creatorName, allowsOwnerActions = false) {
     const creatorRoute = getProfileRoute(item.iosUserId);
-    const episodeUrl = getSafeMediaUrl(item.fullEpisodeFilepath) || getSafeMediaUrl(item.sourceUrl);
+    const episodeUrl = window.VoxxlyEpisodeSources.resolve(item, currentUser && currentUser.preferredSource);
     return `
         <aside class="feed-action-rail" aria-label="Soundbite actions">
           ${episodeUrl
@@ -2032,6 +2032,8 @@
             sharedItems = [normalizeClip({
               ...sharedClip,
               streamUrl: sharedClip.streamUrl || `/iosclips/${sharedClip.id}/stream`,
+              youtubeUrl: sharedClip.youtubeUrl,
+              spotifyUrl: sharedClip.spotifyUrl,
               fullEpisodeName: sharedClip.fullEpisodeName || getValueByPath(sharedClip, "fullEpisode.name"),
               fullEpisodeFilepath: sharedClip.fullEpisodeFilepath || getValueByPath(sharedClip, "fullEpisode.filepath")
             })];
@@ -2894,6 +2896,9 @@
       file: file,
       previewUrl: URL.createObjectURL(file),
       attempted: false,
+      youtubeUrl: "",
+      spotifyUrl: "",
+      sourceOpen: false,
       name: getDefaultClipName(file).replace(/[\u0000-\u001f\u007f-\u009f]/g, "").slice(0, 200),
       status: { type: "info", message: "Ready" },
       progress: 0,
@@ -2972,6 +2977,13 @@
           </div>` : ""}
         </div>
         ${!busy && !item.uploaded ? `<button class="upload-remove" type="button" data-remove-upload="${escapeHtml(item.id)}" aria-label="Remove ${escapeHtml(item.file.name)}">${uploadIcon("close")}</button>` : ""}
+          ${!busy && !item.uploaded ? `<details class="upload-details episode-upload" data-source-details="${escapeHtml(item.id)}" ${item.sourceOpen ? "open" : ""}>
+            <summary>Full episode <span class="muted">(optional)</span>${uploadIcon("chevron")}</summary>
+            <div class="upload-details-fields">${["YOUTUBE", "SPOTIFY"].map(provider => {
+              const key = provider === "YOUTUBE" ? "youtubeUrl" : "spotifyUrl";
+              return `<div class="field"><label class="episode-source-label" for="${key}-${escapeHtml(item.id)}">${window.VoxxlyEpisodeSources.logo(provider)}${window.VoxxlyEpisodeSources.names[provider]}</label><input id="${key}-${escapeHtml(item.id)}" type="url" maxlength="2048" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" data-source-clip="${escapeHtml(item.id)}" data-source-provider="${provider}" value="${escapeHtml(item[key] || "")}" placeholder="${provider === "YOUTUBE" ? "https://youtube.com/watch?v=…" : "https://open.spotify.com/episode/…"}"></div>`;
+            }).join("")}</div>
+          </details>` : ""}
       </article>`;
   }
 
@@ -3038,7 +3050,7 @@
     app.querySelectorAll("[data-choose-upload]").forEach(button => {
       button.addEventListener("click", () => { if (fileInput && !fileInput.disabled) fileInput.click(); });
     });
-    const details = app.querySelector(".upload-details");
+    const details = app.querySelector(".upload-details:not(.episode-upload)");
     if (details) details.addEventListener("toggle", () => { uploadState.detailsOpen = details.open; });
     app.querySelectorAll("[data-preview-upload]").forEach(button => {
       const video = button.querySelector("video");
@@ -3117,6 +3129,16 @@
       });
     }
 
+    app.querySelectorAll("[data-source-details]").forEach(details => details.addEventListener("toggle", () => {
+      const item = uploadState.items.find(item => item.id === details.dataset.sourceDetails);
+      if (item) item.sourceOpen = details.open;
+    }));
+    app.querySelectorAll("[data-source-clip]").forEach(input => input.addEventListener("input", () => {
+      const item = uploadState.items.find(item => item.id === input.dataset.sourceClip);
+      const provider = input.dataset.sourceProvider;
+      if (item) item[provider === "YOUTUBE" ? "youtubeUrl" : "spotifyUrl"] = input.value;
+      input.setCustomValidity(window.VoxxlyEpisodeSources.valid(input.value, provider) ? "" : `Enter a ${window.VoxxlyEpisodeSources.names[provider]} ${provider === "YOUTUBE" ? "video" : "episode"} link.`);
+    }));
     app.querySelectorAll("[data-upload-title]").forEach(function (input) {
       input.addEventListener("input", function (event) {
         const item = uploadState.items.find(function (candidate) {
@@ -3205,6 +3227,8 @@
     formData.append(uploadConfig.titleField || "name", item.name.trim());
     formData.append(uploadConfig.guestCsvField || "guestCsv", normalizeCsv(uploadState.guestCsv));
     formData.append(uploadConfig.hostField || "host", uploadState.host.trim() || uploader.username || "");
+    if (item.youtubeUrl.trim()) formData.append("youtubeUrl", item.youtubeUrl.trim());
+    if (item.spotifyUrl.trim()) formData.append("spotifyUrl", item.spotifyUrl.trim());
     formData.append(uploadConfig.singleFileField || "file", item.file);
     return formData;
   }
@@ -3292,6 +3316,9 @@
       return uploadState === state && sessionGeneration === generation && currentUser && String(currentUser.id) === String(uploader.id);
     };
 
+    if (state.items.some(item => !item.uploaded && (!window.VoxxlyEpisodeSources.valid(item.youtubeUrl, "YOUTUBE") || !window.VoxxlyEpisodeSources.valid(item.spotifyUrl, "SPOTIFY")))) {
+      state.summary = { type: "error", message: "Check the full episode links." }; renderUpload(); return;
+    }
     state.host = String(state.host || uploader.username || "").trim();
     const pendingItems = state.items.filter(function (item) { return !item.uploaded; });
     if (!pendingItems.length) return;
@@ -4880,6 +4907,7 @@
       request: requestJson,
       escape: escapeHtml,
       avatar: avatarMarkup,
+      onSourceChanged: function (value) { if (generation === sessionGeneration && currentUser) currentUser.preferredSource = value; },
       onAccountDeleted: function () {
         if (generation !== sessionGeneration) return;
         pendingProtectedHash = "";

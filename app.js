@@ -2831,7 +2831,7 @@
       file: file,
       previewUrl: URL.createObjectURL(file),
       attempted: false,
-      name: getDefaultClipName(file),
+      name: getDefaultClipName(file).replace(/[\u0000-\u001f\u007f-\u009f]/g, "").slice(0, 200),
       status: { type: "info", message: "Ready" },
       progress: 0,
       clipId: null,
@@ -2844,7 +2844,6 @@
       return;
     }
 
-    const maxBytes = (Number(uploadConfig.maxFileSizeMb) || 100) * 1024 * 1024;
     const existing = new Set(uploadState.items.map(function (item) {
       return `${item.file.name}-${item.file.size}-${item.file.lastModified}`;
     }));
@@ -2856,7 +2855,7 @@
         skipped += 1;
         return;
       }
-      if (!isVideoFile(file) || file.size > maxBytes) {
+      if (window.UploadLimits.videoError(file, uploadState.items.length)) {
         skipped += 1;
         return;
       }
@@ -2865,7 +2864,7 @@
     });
 
     uploadState.summary = skipped
-      ? { type: "info", message: `${pluralize(skipped, "file")} skipped. Choose videos under ${uploadConfig.maxFileSizeMb || 100} MB; duplicates are ignored.` }
+      ? { type: "info", message: "Choose up to 10 videos, each under 100 MB." }
       : null;
     renderUpload();
     document.getElementById("uploadTitle").focus({ preventScroll: true });
@@ -2902,7 +2901,7 @@
         <div class="upload-item-content">
           ${busy || item.uploaded
             ? `<h2 class="upload-item-title">${escapeHtml(item.name)}</h2>`
-            : `<div class="field"><label for="title-${escapeHtml(item.id)}">Title</label><input id="title-${escapeHtml(item.id)}" data-upload-title="${escapeHtml(item.id)}" type="text" value="${escapeHtml(item.name)}" maxlength="160" required /></div>`}
+            : `<div class="field"><label for="title-${escapeHtml(item.id)}">Title</label><input id="title-${escapeHtml(item.id)}" data-upload-title="${escapeHtml(item.id)}" type="text" value="${escapeHtml(item.name)}" maxlength="200" required /></div>`}
           <p class="file-meta" title="${escapeHtml(item.file.name)}">${escapeHtml(fileType)} · ${escapeHtml(formatFileSize(item.file.size))}</p>
           ${showProgress ? `<div class="progress-wrap" data-state="${escapeHtml(item.status.type)}" role="status" aria-label="Status for ${escapeHtml(item.file.name)}">
             <div class="progress-label"><span>${escapeHtml(busy && !item.attempted && !item.uploaded && item.status.type !== "error" ? "Waiting" : item.status.message)}</span></div>
@@ -3233,9 +3232,9 @@
     state.host = String(state.host || uploader.username || "").trim();
     const pendingItems = state.items.filter(function (item) { return !item.uploaded; });
     if (!pendingItems.length) return;
-    const invalidItem = pendingItems.find(function (item) { return !String(item.name || "").trim(); });
+    const invalidItem = pendingItems.find(function (item) { return !window.UploadLimits.validTitle(item.name) || window.UploadLimits.videoError(item.file, 0); });
     if (invalidItem) {
-      state.summary = { type: "error", message: "Give every selected clip a title before uploading." };
+      state.summary = { type: "error", message: "Use a title of 1–200 characters and videos under 100 MB." };
       renderUpload();
       const input = document.getElementById("title-" + invalidItem.id);
       if (input) input.focus();
@@ -3306,7 +3305,7 @@
         };
         item.progress = item.progress || 0;
 
-        if (error.status === 403) {
+        if ([403, 429, 503].includes(error.status)) {
           permissionDenied = true;
           pendingItems.slice(index + 1).forEach(function (remaining) {
             remaining.status = { type: "error", message: "Not uploaded" };
@@ -4170,11 +4169,13 @@
   }
 
   async function prepareAvatar(file) {
+    await window.UploadLimits.validatePhoto(file);
     const url = URL.createObjectURL(file);
     try {
       const image = new Image();
       image.src = url;
       await image.decode();
+      if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth * image.naturalHeight > 16000000) throw new Error("Choose a photo up to 16 megapixels.");
       const canvas = document.createElement("canvas");
       canvas.width = canvas.height = 1024;
       const context = canvas.getContext("2d");
@@ -4209,7 +4210,7 @@
         <div id="editPhotoPreview">${avatarMarkup(user, original, "profile-avatar")}</div>
         <label class="secondary-button profile-photo-picker">Change profile picture<input id="editPhoto" type="file" accept="image/jpeg,image/png,image/webp" class="sr-only"></label>
         <label for="editUsername">@username</label>
-        <input id="editUsername" type="text" autocomplete="username" spellcheck="false" value="${escapeHtml(original)}" aria-describedby="editUsernameStatus">
+        <input id="editUsername" type="text" maxlength="32" autocomplete="username" spellcheck="false" value="${escapeHtml(original)}" aria-describedby="editUsernameStatus">
         <p id="editUsernameStatus" class="muted" role="status" aria-live="polite">Current username</p>
         <p id="editProfileError" role="alert"></p>
         <button class="primary-button" id="applyProfile" type="submit" disabled>Apply</button>

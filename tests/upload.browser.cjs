@@ -148,7 +148,7 @@ const { execFileSync } = require("node:child_process");
     assert.ok((await page.evaluate(() => window.revokedPreviews)).length >= 1);
     // Empty/invalid selections don't expose a broken details screen.
     await page.locator("#clipFiles").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("notes") });
-    await page.getByText(/file skipped/).waitFor();
+    await page.getByText("Choose up to 10 videos, each under 100 MB.", { exact: true }).waitFor();
     assert.equal(await page.locator(".upload-item").count(), 0);
     // Duplicates and size checks without allocating a 101 MB fixture.
     await page.evaluate(() => {
@@ -159,7 +159,7 @@ const { execFileSync } = require("node:child_process");
       document.querySelector("#uploadDropzone").dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: data }));
     });
     assert.equal(await page.locator(".upload-item").count(), 1);
-    await page.getByText(/2 files skipped/).waitFor();
+    await page.getByText("Choose up to 10 videos, each under 100 MB.", { exact: true }).waitFor();
     await clear();
     // Batch retry must only resend the failed file, never the successful one.
     failNames.add("Second video");

@@ -359,21 +359,32 @@
       else if (this.healthySince == null) this.healthySince = now;
       const allowed = !this.suspended && !document.hidden && !this.preparationDisabled &&
         allowNextPreparation(navigator, this.options.prepareNextClip);
-      const next = this.scheduler.ordered.find(entry => entry.offset === this.scheduler.direction);
+      const offsets = this.options.prepareWindow ? [1, 2, -1, -2].map(offset => offset * this.scheduler.direction) : [this.scheduler.direction];
+      const neighbors = offsets.map(offset => this.scheduler.ordered.find(entry => entry.offset === offset)).filter(Boolean);
+      const next = this.options.prepareWindow
+        ? neighbors.find(entry => !entry.visited && !entry.failed && !this.preparationAttempts.has(entry.key))
+        : neighbors[0];
       const loader = this.preparing;
       this.preparationReason = !allowed ? this.preparationDisabled ? "disabled-after-overrun" : "hidden-offline-or-constrained" :
         !healthy ? "current-needs-buffer-or-playback" : "current-buffer-stabilizing";
       if (loader) {
         const ahead = bufferedAhead(loader.video);
-        if (!loader.failed && loader.video.networkState !== 2 && (!allowed || !healthy || loader !== next)) {
+        const remainsNeighbor = this.options.prepareWindow ? neighbors.includes(loader) : loader === next;
+        if (this.options.prepareWindow && loader.prepared && loader.video.networkState !== 2) {
+          loader.video.preload = "none";
+          this.preparing = null;
+          this.preparationReason = "neighbor-ready";
+          return;
+        }
+        if (!loader.failed && loader.video.networkState !== 2 && (!allowed || !healthy || !remainsNeighbor)) {
           // Already-idle buffers cost no competing transfer; preserve them when
           // pausing/backgrounding instead of throwing away successful preparation.
           loader.video.preload = "none";
           this.preparationReason = "retaining-idle-neighbor";
-          if (loader !== next) this.preparing = null;
+          if (!remainsNeighbor) this.preparing = null;
           return;
         }
-        if (!allowed || !healthy || loader !== next || loader.failed) {
+        if (!allowed || !healthy || !remainsNeighbor || loader.failed) {
           this.cancelPreparation(loader, !allowed ? "suspended-or-constrained" : !healthy ? "current-needs-bandwidth" : loader.failed ? "media-error" : "direction-changed");
           return;
         }
@@ -385,7 +396,7 @@
         }
         // Hints cannot enforce bytes. If the native loader ignores the stop hint,
         // evict this unused entry (never the active/visited player), releasing src.
-        if (ahead > 4 || (loader.prepared && loader.video.networkState === 2 && now - loader.preparedAt > 600)) {
+        if ((ahead > 4 && loader.video.networkState === 2) || (loader.prepared && loader.video.networkState === 2 && now - loader.preparedAt > 600)) {
           this.preparationDisabled = true;
           this.cancelPreparation(loader, "native-download-overrun");
         } else if (now - loader.sourceAt > 4000 && loader.video.networkState === 2) {
@@ -423,7 +434,7 @@
     }
     snapshot() {
       return {
-        preparationMode: this.options.speculativeNative ? "legacy-two-ahead" : this.options.prepareNextClip ? "one-ahead" : "off",
+        preparationMode: this.options.speculativeNative ? "legacy-two-ahead" : this.options.prepareNextClip ? (this.options.prepareWindow ? "two-each-side" : "one-ahead") : "off",
         prepareNextClip: Boolean(this.options.prepareNextClip),
         preparationDisabled: this.preparationDisabled,
         preparationReason: this.preparationReason || "not-started",

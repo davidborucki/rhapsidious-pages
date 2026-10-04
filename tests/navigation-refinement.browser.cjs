@@ -1,0 +1,59 @@
+'use strict';
+const {chromium, webkit} = require('playwright');
+const assert = require('node:assert/strict');
+const fs = require('node:fs'), path = require('node:path'), http = require('node:http');
+(async () => {
+  const root = path.resolve(__dirname, '..');
+  const server = http.createServer((req,res) => {
+    const file=path.resolve(root, '.' + (req.url.split('?')[0] === '/' ? '/index.html' : req.url.split('?')[0]));
+    if (!file.startsWith(root + path.sep)) { res.writeHead(403); return res.end(); }
+    fs.readFile(file, (err,data) => { if(err){res.writeHead(404);return res.end();} res.setHeader('Content-Type', ({'.js':'text/javascript','.css':'text/css','.html':'text/html','.svg':'image/svg+xml'})[path.extname(file)] || 'application/octet-stream'); res.end(data); });
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const browser = await (process.env.BROWSER_ENGINE === 'webkit' ? webkit : chromium).launch({headless:true});
+  try {
+    const page = await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+    const errors=[]; page.on('pageerror',e=>errors.push(e.message));
+    const clips=[{id:10,iosUserId:1,name:'My clip',streamUrl:'https://example.test/clip.mp4',repostedByCount:1,repostedByUsernames:['Bryce <Creator>']},{id:11,iosUserId:2,name:'Other clip',streamUrl:'https://example.test/clip.mp4'}];
+    await page.route('https://example.test/**',r=>r.abort());
+    await page.route('https://dev-backend-withered-thunder-4589.fly.dev/**', async r => {
+      const u = new URL(r.request().url()); let body=[];
+      if(u.pathname==='/auth/me') body={id:1,username:'avery',emailConfirmed:true};
+      else if(u.pathname==='/ios/users/1') body={id:1,username:'avery'};
+      else if(u.pathname==='/ios/users/2') body={id:2,username:'Bryce <Creator>'};
+      else if(u.pathname==='/ios/users/search') body=[{id:2,username:'Bryce <Creator>'}];
+      else if(u.pathname==='/iosclips/feed') body=clips;
+      else if(u.pathname.endsWith('/saved-clips')) body=[clips[0]];
+      else if(u.pathname==='/ios/users/1/clips') body=[clips[0]];
+      else if(u.pathname==='/ios/users/2/clips') body=[clips[1]];
+      else if(u.pathname.endsWith('follow-counts')) body={followers:1,following:2};
+      else if(u.pathname.includes('/follows/')) body={following:false};
+      await r.fulfill({contentType:'application/json',body:JSON.stringify(body)});
+    });
+    await page.addInitScript(()=>localStorage.setItem('voxxly_web_access_token','fixture-token'));
+    const origin='http://127.0.0.1:'+server.address().port;
+    await page.goto(origin+'/#/feed');
+    const attribution=page.locator('.is-active [data-repost-attribution]'); await attribution.waitFor();
+    assert.equal(await page.locator('[data-more-clip]').count(),0,'own feed clip must not show More');
+    await attribution.click();
+    const popup=page.locator('#repostDetails');
+    await popup.getByText('reposted this soundbyte').waitFor();
+    assert.equal(await popup.locator('strong').textContent(),'Bryce <Creator>','untrusted usernames are text');
+    assert.equal(await popup.locator('creator').count(),0);
+    await page.screenshot({path:'/private/tmp/voxxly-web-repost-popup-'+(process.env.BROWSER_ENGINE||'chromium')+'.png'});
+    await page.mouse.click(8,8); await popup.waitFor({state:'detached'});
+    await attribution.click(); await popup.getByText('reposted this soundbyte').waitFor();
+    await popup.locator('strong').click();
+    await page.locator('#reportProfile').waitFor(); assert.ok(page.url().includes('userId=2'));
+    await page.goto(origin+'/#/profile?userId=1');
+    await page.locator('[data-view-clip="10"]').click();
+    await page.locator('.clip-viewer-backdrop [data-more-clip="10"]').waitFor();
+    await page.keyboard.press('Escape');
+    await page.goto(origin+'/#/saved'); await page.locator('[data-view-clip="10"]').click();
+    await page.locator('.clip-viewer-backdrop').waitFor();
+    assert.equal(await page.locator('[data-more-clip]').count(),0,'Saved is not owner profile');
+    assert.equal(await page.locator('[data-report-clip]').count(),0,'cannot report own clip');
+    assert.deepEqual(errors,[]);
+    console.log('PASS: More only on own profile; text-only repost attribution, escaped bold name, outside dismissal and profile navigation; mobile layout.');
+  } finally { await browser.close(); await new Promise(r=>server.close(r)); }
+})().catch(e=>{console.error(e);process.exit(1)});

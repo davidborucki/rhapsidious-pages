@@ -41,6 +41,8 @@ window.APP_CONFIG = {
     // Current-first, single-neighbor native attempt, including Safari. Rollback:
     // false retains visited players but does not assign upcoming video sources.
     prepareNextClip: true,
+    // Prepare two clips on either side, serially, after current playback is healthy.
+    prepareWindow: true,
     playbackTelemetry: false,
     // Queue v2 requires the backend schema/flag rollout; never probe legacy feed early.
     queueV2: false,

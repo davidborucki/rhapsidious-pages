@@ -2668,3 +2668,23 @@ html.clip-viewer-open body {
 .email-verification button { flex-shrink:0; color:#ffd7ad; border-color:rgba(255,130,0,.3); background:none; box-shadow:none; padding:10px 16px; font-size:.85rem; }
 .email-verification button:hover:not(:disabled) { background:rgba(255,130,0,.1); border-color:rgba(255,130,0,.45); transform:none; }
 #confirmEmailStatus { margin-top:18px; }
+
+/* Repost attribution stays quiet until opened. */
+.repost-attribution { pointer-events: auto; display: block; border: 0; background: transparent; color: var(--text, #fbfaf8); padding: 8px 0; font-size: .8rem; font-weight: 600; text-align: left; }
+.repost-details { outline: none; width: max-content; max-width: min(340px, calc(100vw - 32px)); margin: auto; padding: 20px; border: 1px solid rgba(255,255,255,.1); border-radius: 16px; background: #181622; color: #fbfaf8; }
+.repost-details::backdrop { background: rgba(0,0,0,.35); }
+.repost-details p { margin: 0; }
+.repost-detail-row { display: flex; align-items: center; gap: 12px; }
+.repost-detail-row + .repost-detail-row { margin-top: 16px; }
+.repost-detail-row a { color: inherit; text-decoration: none; }
+.repost-detail-row strong { font-weight: 700; overflow-wrap: anywhere; }
+.repost-detail-row span:not(.avatar) { display: block; color: #aaa5b2; font-size: .8rem; margin-top: 3px; }
+.repost-detail-avatar { width: 40px; height: 40px; }
+@media (hover: none) and (pointer: coarse) {
+  .feed-volume-control .feed-volume-slider { display: none; }
+  .feed-volume-control:hover, .feed-volume-control:focus-within { width: 44px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .profile-section > .clip-grid-shell, .profile-section > .empty-state { animation: profile-content-in .2s ease-out; }
+  @keyframes profile-content-in { from { opacity: .25; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+}

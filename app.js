@@ -1204,7 +1204,7 @@
     return `<button class="social-action${active ? " is-active" : ""}" type="button" data-${dataName}="${escapeHtml(clipId)}" aria-label="${label} clip" aria-pressed="${active}" ${statePending ? 'aria-busy="true"' : ""} ${pending ? "disabled" : ""}><span class="feed-action-icon feed-action-icon-${iconName}" aria-hidden="true"></span><span data-social-label>${label}</span></button>`;
   }
 
-  function clipModalOpen() { return document.getElementById("videoReport") || document.getElementById("clipTools"); }
+  function clipModalOpen() { return document.getElementById("videoReport") || document.getElementById("clipTools") || document.getElementById("repostDetails"); }
 
   function openClipTools(clipId, trigger) {
     const clip = findKnownClip(clipId) || (clipViewerState && clipViewerState.clips.find(item => String(item.id) === String(clipId)));
@@ -1399,7 +1399,7 @@
     return `<button class="social-action${active ? " is-active" : ""}" type="button" data-like-clip="${escapeHtml(clipId)}" aria-label="${label} clip" aria-pressed="${active}"><span class="feed-action-icon feed-action-icon-heart" aria-hidden="true"></span><span data-like-label>${label}</span></button>`;
   }
 
-  function renderClipActionRail(item, creator, creatorName) {
+  function renderClipActionRail(item, creator, creatorName, allowsOwnerActions = false) {
     const creatorRoute = getProfileRoute(item.iosUserId);
     const episodeUrl = getSafeMediaUrl(item.fullEpisodeFilepath) || getSafeMediaUrl(item.sourceUrl);
     return `
@@ -1413,8 +1413,58 @@
           ${renderLikeButton(item.id)}
           ${renderSocialButton("save", item.id)}
           ${renderSocialButton("repost", item.id)}
-          ${currentUser && String(item.iosUserId) === String(currentUser.id) ? `<button class="social-action video-report-action" type="button" data-more-clip="${escapeHtml(item.id)}" aria-label="More clip options" aria-haspopup="dialog"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg><span>More</span></button>` : renderReportButton(item.id)}
+          ${currentUser && String(item.iosUserId) === String(currentUser.id) ? (allowsOwnerActions ? `<button class="social-action video-report-action" type="button" data-more-clip="${escapeHtml(item.id)}" aria-label="More clip options" aria-haspopup="dialog"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg><span>More</span></button>` : "") : renderReportButton(item.id)}
         </aside>`;
+  }
+
+  function renderRepostAttribution(item) {
+    const names = Array.isArray(item.repostedByUsernames) ? item.repostedByUsernames.filter(name => typeof name === "string" && name.trim()) : [];
+    if (!names.length) return "";
+    const label = names.length === 1 ? `${names[0]} reposted` : `${names[0]} and ${names.length - 1} more reposted`;
+    return `<button type="button" class="repost-attribution" data-repost-attribution="${escapeHtml(item.id)}" aria-haspopup="dialog">${escapeHtml(label)}</button>`;
+  }
+
+  async function openRepostAttribution(clipId, trigger) {
+    document.getElementById("repostDetails")?.close();
+    const clip = findKnownClip(clipId);
+    if (!clip) return;
+    const names = [...new Set((clip.repostedByUsernames || []).filter(name => typeof name === "string" && name.trim()))].slice(0, 5);
+    const generation = sessionGeneration;
+    const dialog = document.createElement("dialog");
+    dialog.id = "repostDetails";
+    dialog.className = "repost-details";
+    dialog.setAttribute("aria-label", "Reposted by");
+    dialog.innerHTML = '<p role="status">Loading…</p>';
+    document.body.appendChild(dialog);
+    const close = () => dialog.close();
+    dialog.addEventListener("click", event => {
+      if (event.target === dialog) {
+        const rect = dialog.getBoundingClientRect();
+        if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close();
+      }
+      if (event.target.closest("a")) close();
+    });
+    dialog.addEventListener("close", () => {
+      dialog.remove(); window.removeEventListener("hashchange", close);
+      if (trigger.isConnected) trigger.focus({ preventScroll: true });
+    }, { once: true });
+    window.addEventListener("hashchange", close);
+    dialog.showModal();
+    try {
+      const users = [];
+      for (const name of names) {
+        if (!dialog.open || generation !== sessionGeneration) return;
+        const url = new URL(getApiUrl(searchConfig.usersPath || "/ios/users/search"));
+        url.searchParams.set("q", name);
+        const matches = await requestJson(url.toString());
+        const user = Array.isArray(matches) && matches.find(user => user && user.id != null && typeof user.username === "string" && user.username.toLowerCase() === name.toLowerCase());
+        if (user) users.push(user);
+      }
+      if (!dialog.open || generation !== sessionGeneration) { close(); return; }
+      dialog.innerHTML = users.length ? users.map(user => `<div class="repost-detail-row"><a href="${escapeHtml(getProfileRoute(user.id))}" aria-label="View ${escapeHtml(user.username)} profile">${avatarMarkup(user, user.username, "repost-detail-avatar")}</a><div><a href="${escapeHtml(getProfileRoute(user.id))}"><strong>${escapeHtml(user.username)}</strong></a><span>reposted this soundbyte</span></div></div>`).join("") : '<p>Profile unavailable</p>';
+    } catch (_) {
+      if (dialog.open) dialog.innerHTML = '<p>Couldn’t load profile.</p>';
+    }
   }
 
   function renderFeedItem(item, deferred) {
@@ -1452,6 +1502,7 @@
             ? `<div class="soundbite-labels"><span class="badge badge-warning">Mature${item.minimumAge ? ` · ${escapeHtml(item.minimumAge)}+` : ""}</span></div>`
             : ""}
           <div class="feed-video-copy">
+            ${renderRepostAttribution(item)}
             <a class="feed-overlay-creator" href="${escapeHtml(creatorRoute)}" aria-label="View @${escapeHtml(creatorName)} profile">@${escapeHtml(creatorName)}</a>
             <h2 id="clipTitle-${escapeHtml(item.id)}" class="feed-overlay-title">${escapeHtml(item.name || "Untitled soundbite")}</h2>
           </div>
@@ -1540,6 +1591,7 @@
         source: playbackSource,
         speculativeNative: feedConfig.speculativeNative === true,
         prepareNextClip: feedConfig.prepareNextClip === true,
+        prepareWindow: feedConfig.prepareWindow === true,
         telemetry: playbackTelemetry,
         onExpired: function () {
           if (feedState.queue && getRoute() === routes.feed) loadQueueFeed({ reconnect: true });
@@ -1580,6 +1632,11 @@
   }
 
   function bindFeedItemActions(root = app) {
+    root.querySelectorAll("[data-repost-attribution]").forEach(button => {
+      if (button.dataset.actionBound === "true") return;
+      button.dataset.actionBound = "true";
+      button.addEventListener("click", event => { event.stopPropagation(); openRepostAttribution(button.dataset.repostAttribution, button); });
+    });
     root.querySelectorAll("[data-more-clip]").forEach(button => {
       if (button.dataset.actionBound === "true") return;
       button.dataset.actionBound = "true";
@@ -3490,7 +3547,7 @@
     const creator = embeddedCreator(clip) || creatorCache.get(String(clip.iosUserId)) || (profileState.user && String(profileState.user.id) === String(clip.iosUserId) ? profileState.user : null);
     const creatorName = (creator && creator.username) || clip.creatorName || "Voxxly creator";
     const rail = state.overlay.querySelector(".feed-action-rail");
-    const markup = renderClipActionRail(clip, creator, creatorName);
+    const markup = renderClipActionRail(clip, creator, creatorName, getRoute() === routes.profile && currentUser && String(profileState.userId) === String(currentUser.id));
     if (rail) rail.outerHTML = markup;
     else state.overlay.querySelector(".clip-viewer-stage").insertAdjacentHTML("beforeend", markup);
     bindFeedItemActions(state.overlay);
@@ -3765,6 +3822,7 @@
         source: playbackSource,
         speculativeNative: feedConfig.speculativeNative === true,
         prepareNextClip: feedConfig.prepareNextClip === true,
+        prepareWindow: feedConfig.prepareWindow === true,
         telemetry: playbackTelemetry,
         create: function (clip) {
           const video = document.createElement("video");

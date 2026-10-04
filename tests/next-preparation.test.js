@@ -153,3 +153,41 @@ test("direction changes reprioritize; revision changes get a new attempt; destro
   assert.equal(pool.preparationAttempts.size, 0);
   assert.ok(entries.every(entry => !entry.video.hasAttribute("src")));
 });
+
+
+test("expanded window prepares two each side serially and retains ready players", t => {
+  const { pool, clips, current, begin, tick } = setup(t);
+  pool.options.prepareWindow = true;
+  begin();
+  const retained = new Map();
+  for (const id of [4, 5, 2, 1]) {
+    const next = pool.preparing;
+    assert.equal(next.clip.id, id);
+    retained.set(id, next.video);
+    assert.equal(next.video.paused, true);
+    next.video.readyState = 3; next.video.ahead = 2.2; next.video.networkState = 1;
+    tick(); tick(); tick();
+    assert.ok(pool.scheduler.entries.size <= 5);
+    assert.equal(current.video.paused, false);
+  }
+  assert.equal(pool.preparing, null);
+  assert.equal(pool.scheduler.ordered.filter(e => e.prepared).length, 4);
+  const previous = pool.reconcile(clips, 1, -1);
+  pool.activate(previous);
+  assert.equal(previous.video, retained.get(2));
+  assert.equal(previous.video.loads, 0);
+});
+
+test("expanded preparation never competes with an unfinished native request", t => {
+  const { pool, begin, tick, current } = setup(t);
+  pool.options.prepareWindow = true;
+  const next = begin();
+  next.video.readyState = 3; next.video.ahead = 2.2; next.video.networkState = 2;
+  tick(); tick(100);
+  assert.equal(pool.preparing, next);
+  assert.equal(pool.scheduler.ordered.filter(e => e.video.hasAttribute("src")).length, 2);
+  current.waiting = true; tick();
+  assert.equal(pool.preparing, null);
+  assert.equal(next.video.hasAttribute("src"), false);
+  assert.equal(current.video.hasAttribute("src"), true);
+});

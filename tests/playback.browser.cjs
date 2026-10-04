@@ -256,6 +256,7 @@ const { execFileSync } = require("node:child_process");
       if (pathname === "/iosclips/interactions") nextWatches.push(route.request().postDataJSON());
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(pathname === "/auth/me" ? { id: 1, username: "test" } : pathname === "/iosclips/feed" ? clips : []) });
     });
+    await nextPage.route("**/config.js*", route => route.fulfill({ contentType: "text/javascript", body: fs.readFileSync(path.join(root, "config.js"), "utf8") + "\nAPP_CONFIG.feed.prepareWindow=false;" }));
     await nextPage.goto(origin + "/?playbackDebug=1#/feed");
     await nextPage.waitForSelector(active);
     await nextPage.locator(active).evaluate(video => video.play());

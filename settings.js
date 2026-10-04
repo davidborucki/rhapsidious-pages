@@ -2,6 +2,7 @@
   "use strict";
   const sections = [
     ["account", "Manage account"],
+    ["analytics", "View analytics"],
     ["blocked", "Blocked users"],
     ["content", "Age-restricted content"],
     ["support", "Contact support"],
@@ -45,6 +46,7 @@
     let supportError = "";
     const draft = { category: "ACCOUNT_ISSUE", message: "", email: user.email || "" };
     const paths = {
+      analytics: '<path d="M4 3v17h17M8 15v-4m5 4V6m5 9V9"/>',
       account: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',
       blocked: '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
       content: '<path d="M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7z"/><path d="M12 8v5m0 3h.01"/>',
@@ -61,7 +63,7 @@
     const externalUrl = id => legalUrl(links && links[externalSections[id].key])
       || new URL(externalSections[id].path, window.location.href).href;
     const groups = [
-      ["Your account", ["account"]],
+      ["Your account", ["account", "analytics"]],
       ["Privacy and content", ["blocked", "content"]],
       ["Support and about", ["support", "privacy", "terms"]]
     ];
@@ -78,7 +80,7 @@
               const title = sections.find(item => item[0] === id)[1];
               const destination = externalSections[id]
                 ? `href="${escape(externalUrl(id))}" target="_blank" rel="noopener noreferrer"`
-                : `href="#/settings?section=${id}"`;
+                : `href="${id === "analytics" ? "#/analytics" : `#/settings?section=${id}`}"`;
               return `<a class="settings-row" data-section="${id}" ${destination}>${icon(id)}<span>${title}</span><svg class="settings-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a>`;
             }).join("")}</section>`).join("")}
             ${(user.admin === true || user.isAdmin === true) ? '<section class="settings-group"><h2>Administration</h2><a class="settings-row" data-section="inbox" href="#/admin/support">'+icon("support")+'<span>Support inbox</span></a></section>' : ""}
@@ -275,6 +277,7 @@
       if (!active) return;
       const query = new URLSearchParams(window.location.hash.split("?")[1] || "");
       const candidate = query.get("section");
+      if (candidate === "analytics") { window.location.hash = "#/analytics"; return; }
       const next = sections.some(item => item[0] === candidate) ? candidate : null;
       if (selected !== next) {
         if (selected) lastSection = selected;

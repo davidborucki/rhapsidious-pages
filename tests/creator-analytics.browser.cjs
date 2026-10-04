@@ -45,7 +45,15 @@ const fs=require('node:fs');const path=require('node:path');const http=require('
   await route.fulfill({status,contentType:'application/json',body:status===204?'':JSON.stringify(body)});
  });
  await page.addInitScript(()=>localStorage.setItem('voxxly_web_access_token','fixture-token'));
- await page.goto(origin+'/#/profile?userId=1');await page.getByRole('link',{name:'View analytics',exact:true}).waitFor();
+ await page.goto(origin+'/#/profile?userId=1');await page.getByRole('link',{name:'Settings',exact:true}).waitFor();
+ assert.equal(await page.getByRole('link',{name:'View analytics',exact:true}).count(),0);
+ await page.getByRole('link',{name:'Settings',exact:true}).click();
+ await page.getByRole('searchbox',{name:'Search settings'}).fill('analytics');
+ assert.equal(await page.locator('[data-section]:visible').count(),1);
+ await page.getByRole('link',{name:'View analytics',exact:true}).click();
+ await page.locator('.analytics-overview').waitFor();
+ await page.getByRole('link',{name:'Settings',exact:true}).click();
+ await page.getByRole('link',{name:'Back to profile',exact:true}).click();
  await page.locator('[data-view-clip="10"]').click();
  const viewer=page.locator('.clip-viewer-backdrop');await viewer.locator('[data-more-clip]').waitFor();assert.equal(await viewer.locator('[data-report-clip]').count(),0);assert.equal(await viewer.locator('.feed-action-rail> :last-child').getAttribute('data-more-clip'),'10');
  await viewer.locator('[data-more-clip]').click();assert.deepEqual(await page.locator('.clip-tool-choice').allTextContents(),['Delete','Edit','View analytics']);
@@ -76,7 +84,7 @@ const fs=require('node:fs');const path=require('node:path');const http=require('
  await viewer.locator('video[data-clip-viewer-video]').evaluate(async video=>{video.muted=true;await video.play();});await page.waitForTimeout(4200);
  await viewer.locator('video[data-clip-viewer-video]').evaluate(video=>video.pause());await page.waitForTimeout(2300);
  await viewer.locator('video[data-clip-viewer-video]').evaluate(video=>{video.currentTime=10;});await page.waitForTimeout(300);
- await viewer.locator('[data-clip-viewer-close]').click();await page.getByRole('link',{name:'View analytics',exact:true}).count();
+ await viewer.locator('[data-clip-viewer-close]').click();
  await page.evaluate(()=>{location.hash='#/analytics';});await page.locator('.analytics-overview').waitFor();
  assert.ok(batches.length>0);const records=batches.flatMap(b=>b.sessions);const watched=records.find(row=>row.clipId===20);assert.ok(watched,JSON.stringify(records));
  assert.ok(watched.watchMs>=3000&&watched.watchMs<5500,JSON.stringify(watched));assert.ok(watched.coverageMs<5500,'seek must not create completion');assert.ok(!records.some(row=>row.clipId===10||row.clipId===11),'self views excluded');

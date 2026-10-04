@@ -33,7 +33,7 @@ const assert = require("node:assert/strict");
     await page.addInitScript(() => localStorage.setItem("voxxly_web_access_token", "test-token"));
     await page.goto(origin + "/#/settings");
     await page.getByRole("heading", { name: "Settings", exact: true }).waitFor();
-    assert.equal(await page.locator("[data-section]").count(), 6);
+    assert.equal(await page.locator("[data-section]").count(), 7);
     assert.equal(await page.locator(".settings-detail").isVisible(), false);
     assert.ok(!requests.some(req => req.path === "/me/blocked-users"));
     async function openSection(name) {
@@ -62,7 +62,7 @@ const assert = require("node:assert/strict");
       }));
       assert.equal(layout.overflow, false);
       assert.equal(layout.detailHidden, true);
-      assert.equal(layout.rows, 6);
+      assert.equal(layout.rows, 7);
       if (process.env.SETTINGS_SCREENSHOT_DIR) await page.screenshot({ path: require("node:path").join(process.env.SETTINGS_SCREENSHOT_DIR, "voxxly-settings-" + width + ".png"), fullPage: true });
     }
     await page.getByRole("searchbox", { name: "Search settings" }).fill("privacy");

@@ -4491,7 +4491,6 @@
               : `<button id="followProfile" class="${state.following ? "secondary-button" : "primary-button"} follow-button" type="button" aria-pressed="${state.following}" ${!state.loaded || !state.followStateKnown || state.followPending || state.blockPending ? "disabled" : ""}>${profileIcon(state.following ? "following" : "follow")}<span>${state.following ? "Following" : "Follow"}</span></button><button id="shareProfile" class="secondary-button" type="button">${profileIcon("share")}<span>Share</span></button><button id="reportProfile" class="profile-report-button" type="button" aria-label="Report account" title="Report account">${profileIcon("report")}</button>`}
           </div>
         </div>
-        ${isOwnProfile ? `<a class="profile-analytics-link" href="#/analytics"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 3v17h17M8 15v-4m5 4V6m5 9V9"/></svg>View analytics</a>` : ""}
         ${isOwnProfile && currentUser.emailConfirmed !== true ? verificationPrompt() : ""}
         <section class="profile-section" aria-labelledby="profileClipsTitle">
           <div class="profile-section-head">

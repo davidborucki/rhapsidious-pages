@@ -65,8 +65,6 @@
 .analytics-footer { padding:8px 0 30px;color:var(--muted);font-size:.72rem;line-height:1.7; }
 .analytics-footer details { margin-top:14px;max-width:660px; }
 .analytics-footer summary { cursor:pointer;color:var(--muted-strong); }
-.profile-analytics-link { display:flex;align-items:center;justify-content:center;gap:8px;width:max-content;margin:20px auto 0;color:var(--muted-strong);font-size:.85rem;text-decoration:none; }
-.profile-analytics-link svg { width:18px;height:18px; }
 .clip-tools { width:min(380px,calc(100% - 32px));padding:22px;border:1px solid var(--line);border-radius:22px;background:var(--surface);color:var(--text); }
 .clip-tools::backdrop { background:rgba(0,0,0,.65); }
 .clip-tools h2 { font-size:1.2rem;margin:0 0 20px;letter-spacing:-.025em; }

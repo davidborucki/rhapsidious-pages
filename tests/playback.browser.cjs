@@ -61,7 +61,7 @@ const { execFileSync } = require("node:child_process");
     let feeds = 0;
     let creatorCalls = 0;
     const clips = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, iosUserId: 2, name: `Clip ${i + 1}`, streamUrl: `${origin}/media/${i + 1}.mp4`, thumbnailUrl: null }));
-    clips[3].fullEpisodeFilepath = `${origin}/media/episode.mp4`;
+    clips[3].youtubeUrl = "https://youtu.be/episode";
     await page.route("**/config.js*", async route => {
       const source = fs.readFileSync(path.join(root, "config.js"), "utf8");
       await route.fulfill({ contentType: "text/javascript", body: source + "\nAPP_CONFIG.feed.playbackTelemetry=true; APP_CONFIG.feed.speculativeNative=true;" });

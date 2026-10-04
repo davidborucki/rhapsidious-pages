@@ -87,6 +87,28 @@
   let feedAudioEnabled = true;
   let feedVolume = 1;
   const feedPlayRequests = new WeakMap();
+  const playerBindings = new WeakMap();
+  // Safari (including iOS browsers) scopes audible permission to a media element.
+  // Keep the last authorized element as a fallback, preserving warm decoders when allowed.
+  const needsStableAudio = /AppleWebKit/.test(navigator.userAgent) &&
+    (!/Chrome|Chromium|Edg\//.test(navigator.userAgent) || /iPhone|iPad|iPod/.test(navigator.userAgent));
+  const stableAudioVideo = needsStableAudio ? { video: null } : null;
+  function releasePlayerBindings(video) {
+    feedPlayRequests.set(video, (feedPlayRequests.get(video) || 0) + 1);
+    const cleanup = playerBindings.get(video);
+    if (cleanup) cleanup();
+    playerBindings.delete(video);
+    delete video.dataset.feedBound;
+  }
+  function playerEvents(video) {
+    releasePlayerBindings(video);
+    const cleanups = [];
+    playerBindings.set(video, () => cleanups.forEach(cleanup => cleanup()));
+    return (target, name, listener) => {
+      target.addEventListener(name, listener);
+      cleanups.push(() => target.removeEventListener(name, listener));
+    };
+  }
   let creatorCache = new Map();
   let creatorRequests = new Map();
   let feedPool = null;
@@ -1595,6 +1617,8 @@
     if (!feedPool) {
       feedPool = new playback.NativePool({
         source: playbackSource,
+        stableVideo: stableAudioVideo,
+        releaseVideo: releasePlayerBindings,
         speculativeNative: feedConfig.speculativeNative === true,
         prepareNextClip: feedConfig.prepareNextClip === true,
         prepareWindow: feedConfig.prepareWindow === true,
@@ -1612,6 +1636,11 @@
       });
     }
     const previousActive = feedPool.active;
+    if (previousActive && previousActive.clip !== feedState.items[index]) {
+      // Capture the old clip before Safari reuses its media element/source.
+      creatorTracking.stop();
+      stopWatching(String(previousActive.clip.id), true);
+    }
     const entry = feedPool.reconcile(feedState.items, index, direction);
     const list = document.getElementById("feedList");
     const pool = feedPool;
@@ -2324,15 +2353,29 @@
   function playFeedVideo(card) {
     const video = card.querySelector("[data-feed-video]");
     if (!video || !card.classList.contains("is-active") || document.hidden) return;
+    playSoundbiteVideo(card, video, () => card.isConnected && card.classList.contains("is-active"));
+  }
+
+  function playViewerVideo() {
+    const state = clipViewerState;
+    const video = state && state.overlay.querySelector("[data-clip-viewer-video]");
+    if (!video) return;
+    playSoundbiteVideo(state.overlay, video, () => clipViewerState === state &&
+      state.overlay.isConnected && state.overlay.querySelector("[data-clip-viewer-video]") === video);
+  }
+
+  function playSoundbiteVideo(card, video, isCurrent) {
     const request = (feedPlayRequests.get(video) || 0) + 1;
     feedPlayRequests.set(video, request);
-    const stillCurrent = () => feedPlayRequests.get(video) === request && card.isConnected &&
-      card.classList.contains("is-active") && !document.hidden;
+    const stillCurrent = () => feedPlayRequests.get(video) === request && isCurrent() && !document.hidden;
+    if (!isCurrent() || document.hidden) return;
     video.volume = feedVolume;
     video.muted = !feedAudioEnabled;
     delete card.dataset.audioBlocked;
     updateFeedVolumeControl(card, video);
-    video.play().catch(function (error) {
+    video.play().then(function () {
+      if (stableAudioVideo && stillCurrent() && feedAudioEnabled && !video.muted) stableAudioVideo.video = video;
+    }).catch(function (error) {
       // A late rejection from an older activation must not mute a newer play or
       // override a pause/volume choice. AbortError is not an autoplay rejection.
       if (!stillCurrent() || !error || error.name !== "NotAllowedError") return;
@@ -2340,12 +2383,31 @@
         const entry = feedPool.scheduler.ordered.find(item => item.video === video);
         feedPool.record("autoplay-blocked", entry, { requestedSound: feedAudioEnabled });
       }
+      if (feedAudioEnabled && recoverSoundbiteAudio(card, video)) return;
       if (feedAudioEnabled) card.dataset.audioBlocked = "true";
       video.muted = true;
       updateFeedVolumeControl(card, video);
       // Keep visuals moving when permitted; never change the user's sound preference.
       video.play().catch(function () {});
     });
+  }
+
+  function recoverSoundbiteAudio(card, video) {
+    if (!stableAudioVideo?.video || stableAudioVideo.video === video) return false;
+    const isFeed = card.matches("[data-feed-card]");
+    const pool = isFeed ? feedPool : clipViewerState?.pool;
+    const entry = pool?.active;
+    if (!entry || entry.video !== video) return false;
+    const restoreFocus = document.activeElement === video;
+    creatorTracking.stop();
+    const recovered = pool.recoverAudio(entry);
+    if (!recovered) return false;
+    if (isFeed) bindFeedPlayers(null, false);
+    else recovered.setAttribute("data-clip-viewer-video", "");
+    creatorTracking.select(recovered, entry.clip, isFeed ? (feedState.sharedClipId ? "shared" : "feed") : getRoute() === routes.saved ? "saved" : "profile");
+    if (restoreFocus) recovered.focus({ preventScroll: true });
+    if (isFeed) playFeedVideo(card); else playViewerVideo();
+    return true;
   }
 
   function renderVideoVolumeControl(name) {
@@ -2408,6 +2470,8 @@
       const overlay = clipViewerState.overlay;
       const video = overlay.querySelector("[data-clip-viewer-video]");
       if (video) {
+        feedPlayRequests.set(video, (feedPlayRequests.get(video) || 0) + 1);
+        delete overlay.dataset.audioBlocked;
         video.volume = feedVolume;
         video.muted = !feedAudioEnabled;
         updateFeedVolumeControl(overlay, video);
@@ -2426,14 +2490,17 @@
     control.dataset.volumeBound = "true";
     button.addEventListener("click", function (event) {
       event.stopPropagation();
-      const activeVideo = card.querySelector("[data-clip-viewer-video]") || video;
+      const activeVideo = card.querySelector("[data-clip-viewer-video], [data-feed-video]") || video;
       const wasBlocked = card.dataset.audioBlocked === "true";
       feedAudioEnabled = activeVideo.muted || activeVideo.volume === 0;
       applyFeedAudioState();
-      if (feedAudioEnabled && card.matches("[data-feed-card]") && (wasBlocked || !activeVideo.paused)) playFeedVideo(card);
+      if (feedAudioEnabled && (wasBlocked || !activeVideo.paused)) {
+        if (card.matches("[data-feed-card]")) playFeedVideo(card); else playViewerVideo();
+      }
     });
     slider.addEventListener("input", function (event) {
       event.stopPropagation();
+      const activeVideo = card.querySelector("[data-clip-viewer-video], [data-feed-video]") || video;
       const nextVolume = Math.max(0, Math.min(1, Number(slider.value) / 100));
       const wasBlocked = card.dataset.audioBlocked === "true";
       if (nextVolume === 0) {
@@ -2443,7 +2510,9 @@
         feedAudioEnabled = true;
       }
       applyFeedAudioState();
-      if (feedAudioEnabled && card.matches("[data-feed-card]") && (wasBlocked || !video.paused)) playFeedVideo(card);
+      if (feedAudioEnabled && (wasBlocked || !activeVideo.paused)) {
+        if (card.matches("[data-feed-card]")) playFeedVideo(card); else playViewerVideo();
+      }
     });
     control.addEventListener("click", function (event) {
       event.stopPropagation();
@@ -2756,6 +2825,7 @@
         return;
       }
 
+      const on = playerEvents(video);
       video.dataset.feedBound = "true";
       bindFeedVolumeControl(card, video);
       let previousPlaybackTime = 0;
@@ -2773,19 +2843,20 @@
           video.pause();
         }
       };
-      card.querySelector("[data-feed-audio-prompt]").addEventListener("click", function (event) {
+      on(card.querySelector("[data-feed-audio-prompt]"), "click", function (event) {
         event.stopPropagation();
         playFeedVideo(card);
         video.focus({ preventScroll: true });
       });
-      video.addEventListener("click", togglePlayback);
-      video.addEventListener("keydown", function (event) {
+      on(video, "volumechange", updatePlaybackLabel);
+      on(video, "click", togglePlayback);
+      on(video, "keydown", function (event) {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           togglePlayback();
         }
       });
-      video.addEventListener("play", function () {
+      on(video, "play", function () {
         if (!card.classList.contains("is-active") || document.hidden) { video.pause(); return; }
         app.querySelectorAll("[data-feed-video]").forEach(function (otherVideo) {
           if (otherVideo !== video && !otherVideo.paused) {
@@ -2794,19 +2865,19 @@
         });
         updatePlaybackLabel();
       });
-      video.addEventListener("playing", function () {
+      on(video, "playing", function () {
         if (card.classList.contains("is-active") && !document.hidden) startWatching(clipId);
       });
-      video.addEventListener("waiting", function () { stopWatching(clipId, false); });
-      video.addEventListener("pause", function () {
+      on(video, "waiting", function () { stopWatching(clipId, false); });
+      on(video, "pause", function () {
         stopWatching(clipId, true);
         updatePlaybackLabel();
       });
-      video.addEventListener("ended", function () {
+      on(video, "ended", function () {
         stopWatching(clipId, true);
         updatePlaybackLabel();
       });
-      video.addEventListener("timeupdate", function () {
+      on(video, "timeupdate", function () {
         if (card.classList.contains("is-active") && !video.paused && previousPlaybackTime > 1 && video.currentTime + 0.5 < previousPlaybackTime) {
           stopWatching(clipId, false);
           const record = getWatchRecord(clipId);
@@ -3560,6 +3631,8 @@
       return;
     }
 
+    // Finish attribution while the outgoing video's duration is still available.
+    if (!state.pool || state.pool.active?.clip !== clip) creatorTracking.stop();
     let video = state.overlay.querySelector("[data-clip-viewer-video]");
     if (state.pool) {
       const direction = state.index < (state.previousIndex || 0) ? -1 : 1;
@@ -3606,11 +3679,7 @@
     creatorLink.setAttribute("aria-label", `View @${creatorName} profile`);
     creatorLink.innerHTML = `${avatarMarkup(creator, creatorName, "clip-viewer-avatar")}<span>@${escapeHtml(creatorName)}</span>`;
     if (!state.pool) video.load();
-    video.play().catch(function () {
-      if (clipViewerState !== state || !video.hasAttribute("data-clip-viewer-video") || document.hidden) return;
-      if (!video.muted) { video.muted = true; video.play().catch(function () {}); }
-      updateClipViewerPlaybackState();
-    });
+    playViewerVideo();
   }
 
   function updateClipViewerPlaybackState() {
@@ -3636,11 +3705,10 @@
     if (!video) {
       return;
     }
-    if (video.paused) {
-      video.play().catch(function () {
-        updateClipViewerPlaybackState();
-      });
+    if (video.paused || (feedAudioEnabled && clipViewerState.overlay.dataset.audioBlocked === "true")) {
+      playViewerVideo();
     } else {
+      feedPlayRequests.set(video, (feedPlayRequests.get(video) || 0) + 1);
       video.pause();
     }
   }
@@ -3853,6 +3921,9 @@
     if (usePlaybackWindow) {
       clipViewerState.pool = new playback.NativePool({
         source: playbackSource,
+        stableVideo: stableAudioVideo,
+        releaseVideo: releasePlayerBindings,
+        videoChanged: entry => bindViewerVideo(entry.video, overlay),
         speculativeNative: feedConfig.speculativeNative === true,
         prepareNextClip: feedConfig.prepareNextClip === true,
         prepareWindow: feedConfig.prepareWindow === true,
@@ -3892,13 +3963,14 @@
   }
 
   function bindViewerVideo(viewerVideo, overlay) {
-    viewerVideo.addEventListener("volumechange", function () {
+    const on = playerEvents(viewerVideo);
+    on(viewerVideo, "volumechange", function () {
       if (viewerVideo.hasAttribute("data-clip-viewer-video")) updateFeedVolumeControl(overlay, viewerVideo);
     });
-    viewerVideo.addEventListener("click", toggleClipViewerPlayback);
-    viewerVideo.addEventListener("play", updateClipViewerPlaybackState);
-    viewerVideo.addEventListener("pause", updateClipViewerPlaybackState);
-    viewerVideo.addEventListener("keydown", function (event) {
+    on(viewerVideo, "click", toggleClipViewerPlayback);
+    on(viewerVideo, "play", updateClipViewerPlaybackState);
+    on(viewerVideo, "pause", updateClipViewerPlaybackState);
+    on(viewerVideo, "keydown", function (event) {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         toggleClipViewerPlayback();

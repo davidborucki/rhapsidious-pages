@@ -72,3 +72,28 @@ Safari/iPhone cellular performance is not established by desktop Chromium tests.
 - One-ahead phase removed connection hints and used a generated 270x480 H.264/AAC, 24-second MP4 (2,893,667 bytes), served from localhost in 32 KiB chunks every 80 ms. It observed a real clip-2 request before navigation, reuse of that same player/source, no clip-3 request, no speculative watch, and only one playing video. One warm activation-to-frame sample was 93.7 ms; earlier runs varied. This is not an iPhone, cellular, CDN, h2/h3 or percentile claim.
 - After playable neighbor data arrived, a simulated current `waiting` event evicted only that unused neighbor. The real HTTP response was aborted after 65,536 server-written bytes, before the full file transferred. This verifies that cancellation path in Chromium, not a universal byte limit.
 - Local artifacts: `/var/folders/vb/j0crsdq14132f72sz3m17sc40000gn/T/voxxly-playback-gTfMLB/one-ahead.json`, `one-ahead-diagnostics.png`, responsive screenshots and the full `telemetry.json` in the same directory. Temporary artifacts may be removed by the OS.
+
+### Audio continuity — October 4, 2026
+
+Feed and Saved/profile playback now share one audio-request path. Only a current
+`NotAllowedError` can trigger muted autoplay; aborted loads, media errors and stale
+promises cannot overwrite the user's sound preference.
+
+WebKit keeps a reference to the last element that successfully played with sound.
+If a different element is denied audible playback, the pool moves that authorized
+element into the current clip and retries with sound. Ordinary playback continues
+using retained/prepared decoders. Recovery releases old listeners and sources,
+rebinds controls, and keeps analytics attached to the correct clip. No offscreen
+player is played to manufacture permission. The first visit can still require a
+user gesture under the browser's autoplay policy.
+
+`tests/audio-continuity.browser.cjs` uses generated H.264/AAC media and a local API
+server. It covers 66 transitions through Soundbytes, Saved, own and other profiles,
+window eviction, backward navigation, deliberate mute/unmute, pause/resume,
+interrupted loads, stale policy rejections, and cross-route recovery. Run with
+`BROWSER_ENGINE=webkit` or `BROWSER_ENGINE=chromium`; add `STRICT_AUDIO=1` to WebKit
+to explicitly model element-scoped permission without granting it on scroll.
+`TEST_BASE_URL=https://upload.rhapsidious.com` checks deployed assets while routing
+all fixture API/media requests locally; it does not mutate production accounts.
+Playwright and ffmpeg must be available. These are browser-engine tests, not a
+claim of physical iPhone or cellular performance measurements.

@@ -181,6 +181,12 @@
       video.preload = "none";
       video.muted = true;
       this.hide(entry);
+      this.bindVideo(entry);
+      return entry;
+    }
+    bindVideo(entry) {
+      const video = entry.video;
+      entry.cleanups = [];
       const on = (name, handler) => {
         video.addEventListener(name, handler);
         entry.cleanups.push(() => video.removeEventListener(name, handler));
@@ -215,7 +221,6 @@
       on("play", () => {
         if (entry !== this.active || this.suspended || document.hidden) video.pause();
       });
-      return entry;
     }
     reconcile(clips, index, direction) {
       const entry = this.scheduler.reconcile(clips, index, direction);
@@ -254,6 +259,61 @@
       entry.wrapper.inert = !interactive;
       entry.wrapper.setAttribute("aria-hidden", String(!interactive));
       entry.video.tabIndex = interactive ? 0 : -1;
+    }
+    releaseVideoBindings(entry) {
+      this.cancelFrame(entry);
+      entry.cleanups.forEach(cleanup => cleanup());
+      entry.cleanups = [];
+      if (this.options.releaseVideo) this.options.releaseVideo(entry.video);
+    }
+    recoverAudio(entry) {
+      const holder = this.options.stableVideo;
+      if (!holder?.video || this.closed || this.active !== entry) return null;
+      const video = holder.video;
+      if (entry.video === video) return null;
+      // WebKit grants audible playback per element. Keep the authorized element
+      // when a prepared player is denied audio. Otherwise keep its warm decoder.
+      const old = this.scheduler.ordered.find(item => item.video === video);
+      if (old) {
+        video.pause();
+        this.releaseVideoBindings(old);
+        const placeholder = old.standbyVideo || video.cloneNode(false);
+        placeholder.removeAttribute("src");
+        placeholder.removeAttribute("data-feed-bound");
+        placeholder.removeAttribute("data-clip-viewer-video");
+        placeholder.muted = true;
+        placeholder.preload = "none";
+        video.replaceWith(placeholder);
+        if (old.wrapper === video) old.wrapper = placeholder;
+        old.video = placeholder;
+        old.standbyVideo = null;
+        old.prepared = false;
+        this.bindVideo(old);
+        this.hide(old);
+        if (this.options.videoChanged) this.options.videoChanged(old);
+      }
+      const prepared = entry.video;
+      this.releaseVideoBindings(entry);
+      prepared.pause();
+      const attributes = Array.from(prepared.attributes).filter(attribute => !["src", "autoplay", "data-feed-bound"].includes(attribute.name));
+      video.pause();
+      for (const attribute of Array.from(video.attributes)) video.removeAttribute(attribute.name);
+      for (const attribute of attributes) video.setAttribute(attribute.name, attribute.value);
+      prepared.replaceWith(video);
+      if (entry.wrapper === prepared) entry.wrapper = video;
+      entry.video = video;
+      entry.standbyVideo = prepared;
+      // Cancel the speculative decoder/request before starting the foreground one.
+      prepared.removeAttribute("src");
+      prepared.load();
+      entry.prepared = false;
+      entry.waiting = true;
+      this.bindVideo(entry);
+      if (this.options.videoChanged) this.options.videoChanged(entry);
+      this.active = null;
+      this.activate(entry, entry.navigationAt);
+      this.record("audio-player-reused", entry, {});
+      return video;
     }
     activate(entry, navigationAt) {
       if (this.closed || !entry) return;
@@ -471,8 +531,7 @@
       if (this.active === entry) this.active = null;
       if (this.loader === entry) this.loader = null;
       this.record("evict", entry, { unused: !entry.visited, bufferedSeconds: bufferedAhead(entry.video) });
-      this.cancelFrame(entry);
-      entry.cleanups.forEach(cleanup => cleanup());
+      this.releaseVideoBindings(entry);
       // No fetches or blob URLs are owned by this implementation.
       entry.video.pause();
       entry.video.removeAttribute("src");

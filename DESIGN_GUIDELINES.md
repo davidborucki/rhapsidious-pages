@@ -61,7 +61,7 @@ Keep errors specific and actionable. Put genuinely useful secondary explanations
 
 ### Profiles and account lists
 
-- Use a borderless circular avatar. Default avatars use the same solid muted background and initial treatment everywhere, including the header beside Log out.
+- Use a borderless circular avatar. Default avatars use the same solid muted background and initial treatment everywhere, including the web header beside Log out.
 - Place the avatar before the name and handle. Keep stats in this order: **Posts, Followers, Following**.
 - Own profile actions: **Edit profile** and **Settings**.
 - Other profile actions: **Follow / Following**, **Share**, then an icon-only circular report button on the same row. Match its height to the neighboring buttons.
@@ -69,6 +69,13 @@ Keep errors specific and actionable. Put genuinely useful secondary explanations
 - Share copies the profile link and shows the compact confirmation banner.
 - Email verification is visible only to the owner and disappears after confirmation.
 - Account lists do not need trailing arrows. Keep return navigation simple, without “Back to @…” arrow decoration.
+
+### Native navigation
+
+- The Voxxly/avatar/Log out header is web-only. Do not add it to signed-in iOS screens.
+- iOS uses a flat bottom bar anchored to the bottom safe area, without a floating card: **Soundbytes, Search, Upload, Profile**. Saved clips are under **Profile → Settings → Saved clips**.
+- Profile and Saved videos push from the right and return to their source page on a rightward swipe. Do not present these viewers as bottom sheets.
+- Animate Posts/Reposts selection and respect Reduce Motion. Tapping blank Search space dismisses the keyboard without interfering with profile links.
 
 ### Settings
 
@@ -79,9 +86,10 @@ Keep errors specific and actionable. Put genuinely useful secondary explanations
 ### Video controls
 
 - Keep the same right-hand vertical interaction stack across feed, profile, and saved viewers.
-- Order: Watch when available, Profile, Like, Save, Repost, then Report for another user's clip or **More** for the owner's clip.
-- Use white icons by default. More uses three dots and offers **Delete**, **Edit**, and **View analytics**.
-- Align close and mute controls at the same height, with matching sizes and symmetric insets from the video frame.
+- Order: Watch when available, Profile, Like, Save, Repost, then Report for another user's clip. **More** appears for owned clips only when viewing the signed-in user's profile; never on Soundbytes or Saved.
+- Use white icons by default. Selected Like is `#ff453a`, Save `#f47604`, and Repost `#ffc107`, including labels. Watch uses the shared red/yellow popcorn artwork. More uses three dots.
+- On web, align close and mute controls with symmetric insets. Native iOS uses system volume and has no on-screen volume changer.
+- Repost attribution is text without a people icon. Open a small dismissible popup with the reposter's avatar, bold name, and “reposted this soundbyte”; avatar/name link to their profile.
 - Keep controls visible and anchored correctly through swipes, loading, transitions, and browser viewport changes.
 - Navigate profile videos with vertical touch and trackpad gestures, without previous/next arrow buttons. Handle momentum without blocking the next deliberate gesture.
 - Open report dialogs with the reason picker closed; the user chooses when to open it.

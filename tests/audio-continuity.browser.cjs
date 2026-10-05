@@ -18,13 +18,16 @@ const { execFileSync } = require('node:child_process');
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname.startsWith('/api/')) {
       const p = url.pathname.slice(4); let body = [];
-      if (p === '/auth/me') body = user(1);
+      if (p === '/auth/login') body = {accessToken:'audio-test'};
+      else if (p === '/auth/me') body = user(1);
       else if (/^\/ios\/users\/[12]$/.test(p)) body = user(Number(p.split('/').pop()));
       else if (p === '/iosclips/feed' || p.endsWith('/saved-clips')) body = clips(2);
       else if (/\/users\/[12]\/clips$/.test(p)) body = clips(Number(p.split('/')[3]));
       else if (p.endsWith('follow-counts')) body = {followers:0,following:0};
       else if (p.includes('/follows/')) body = {following:false};
-      res.setHeader('Content-Type','application/json'); res.end(JSON.stringify(body)); return;
+      res.setHeader('Content-Type','application/json');
+      if(p === '/iosclips/feed' || p === '/auth/login') setTimeout(()=>res.end(JSON.stringify(body)),180);
+      else res.end(JSON.stringify(body)); return;
     }
     if (url.pathname.startsWith('/media/')) {
       requests.push({path:url.pathname,range:req.headers.range});
@@ -60,8 +63,8 @@ const { execFileSync } = require('node:child_process');
       });
     }
     page.on('pageerror',e=>errors.push(e.message));
-    await page.addInitScript(({strict}) => {
-      localStorage.setItem('voxxly_web_access_token','audio-test');
+    await page.addInitScript(({strict,startup}) => {
+      if(startup!=='login') localStorage.setItem('voxxly_web_access_token','audio-test');
       window.audioBlocks=0; window.nativePlay=HTMLMediaElement.prototype.play;
       const grants=new WeakSet(); let gesture=false;
       window.addEventListener('click',()=>{gesture=true;setTimeout(()=>gesture=false,0);},true);
@@ -74,7 +77,7 @@ const { execFileSync } = require('node:child_process');
         }
         return window.nativePlay.call(this);
       };
-    }, {strict:process.env.STRICT_AUDIO==='1'});
+    }, {strict:process.env.STRICT_AUDIO==='1',startup:process.env.STARTUP_AUDIO});
     let feed = true;
     const active = () => page.locator(feed ? '.soundbite-card.is-active video' : '[data-clip-viewer-video]');
     const surface = () => page.locator(feed ? '.soundbite-card.is-active' : '.clip-viewer-backdrop');
@@ -107,11 +110,31 @@ const { execFileSync } = require('node:child_process');
       await playing(muted); results.push({surface:feed?'feed':await page.evaluate(()=>location.hash),id,firstPlaybackMs:Date.now()-before});
       await page.waitForTimeout(600);
     }
-    await page.goto(origin+'/?playbackDebug=1#/feed');
+    const startup=process.env.STARTUP_AUDIO;
+    if(startup==='navigation') {
+      await page.goto(origin+'/?playbackDebug=1#/saved');
+      await page.locator('[data-view-clip]').first().waitFor();
+      await page.locator('.primary-nav [data-route="#/feed"]').tap();
+    } else if(startup==='login') {
+      await page.goto(origin+'/?playbackDebug=1#/login');
+      await page.locator('[name="login"]').fill('viewer');
+      await page.locator('[name="password"]').fill('fixture-password');
+      await page.locator('#loginSubmit').tap();
+    } else await page.goto(origin+'/?playbackDebug=1#/feed');
     await active().waitFor();
     await page.evaluate(()=>window.foreground=document.querySelector('.soundbite-card.is-active video'));
-    if(await active().evaluate(v=>v.muted || v.paused)) await active().tap();
+    if(startup==='direct') {
+      await playing(true);
+      // Swipes are not permission on some iOS versions: do not fabricate success.
+      await step(1,2,true,true);
+      await step(1,3,true,true);
+      await page.locator('.primary-nav [data-route="#/feed"]').tap();
+      await playing();
+      await step(-1,2);await step(-1,1);
+      await page.evaluate(()=>window.foreground=document.querySelector('.soundbite-card.is-active video'));
+    } else if(!startup && await active().evaluate(v=>v.muted || v.paused)) await active().tap();
     await playing();
+    if(startup==='navigation' || startup==='login') assert.equal(await page.evaluate(()=>window.audioBlocks),0,'entry gesture authorizes the real player before async auth/feed requests');
     const initialBlocks=await page.evaluate(()=>window.audioBlocks);
     for(const id of [2,3,4,5,6,7,8,9]) {
       await step(1,id,false,id%2===0);
@@ -120,10 +143,17 @@ const { execFileSync } = require('node:child_process');
     for(const id of [8,7,6]) await step(-1,id);
     await surface().locator('[data-feed-mute-toggle]').tap(); await playing(true);
     await step(1,7,true);
+    if(startup) {
+      await page.evaluate(()=>location.hash='#/saved');
+      await page.locator('[data-view-clip]').first().waitFor();
+      await page.locator('.primary-nav [data-route="#/feed"]').tap();
+      await playing(true);
+    }
     await surface().locator('[data-feed-mute-toggle]').tap(); await playing();
     await active().tap(); assert.equal(await active().evaluate(v=>v.paused),true);
     await active().tap(); await playing();
     if(process.env.STRICT_AUDIO!=='1') assert.equal(await page.evaluate(()=>window.audioBlocks),initialBlocks);
+    if(process.env.STARTUP_ONLY==='1') {assert.deepEqual(errors,[]);console.log('PASS startup '+startup+': no unmute tap; 12 forward/back transitions and deliberate mute preserved');return;}
     for(const route of ['saved','profile?userId=1','profile?userId=2']) {
       await page.evaluate(route=>location.hash='#/'+route,route); feed=false;
       await page.locator('[data-view-clip="4"]').tap(); await playing();

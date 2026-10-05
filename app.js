@@ -93,6 +93,7 @@
   const needsStableAudio = /AppleWebKit/.test(navigator.userAgent) &&
     (!/Chrome|Chromium|Edg\//.test(navigator.userAgent) || /iPhone|iPad|iPod/.test(navigator.userAgent));
   const stableAudioVideo = needsStableAudio ? { video: null } : null;
+  let feedStartupVideo = null;
   function releasePlayerBindings(video) {
     feedPlayRequests.set(video, (feedPlayRequests.get(video) || 0) + 1);
     const cleanup = playerBindings.get(video);
@@ -775,6 +776,7 @@
     verificationSentAt = 0;
     verificationSending = false;
     currentUser = null;
+    feedStartupVideo = null;
     cleanupFeedObservers(true);
     clearTokens();
     resetUserData();
@@ -1072,6 +1074,7 @@
     }
 
     submitButton.disabled = true;
+    beginFeedAudioGesture();
     submitButton.textContent = "Logging in…";
     setStatusMessage("loginStatus", null);
 
@@ -1135,6 +1138,7 @@
     }
 
     submitButton.disabled = true;
+    beginFeedAudioGesture();
     submitButton.textContent = "Creating…";
     form.dataset.busy = "true";
     document.getElementById("signupBack").disabled = true;
@@ -1599,6 +1603,7 @@
       const entry = syncFeedWindow(feedState.activeIndex, 1);
       activateFeedCard(entry.wrapper.querySelector("[data-feed-card]"));
     } else {
+      if (hasItems) adoptFeedStartupVideo(app);
       bindFeedItemActions();
       bindFeedPlayers();
     }
@@ -1631,6 +1636,7 @@
           slide.className = "feed-slide";
           slide.setAttribute("data-feed-slide", "");
           slide.innerHTML = renderFeedItem(clip, true);
+          adoptFeedStartupVideo(slide);
           return slide;
         }
       });
@@ -2410,6 +2416,38 @@
     return true;
   }
 
+  function beginFeedAudioGesture() {
+    if (!feedAudioEnabled || document.hidden) return;
+    const card = app.querySelector(".soundbite-card.is-active");
+    if (card && getRoute() === routes.feed) {
+      if (card.dataset.audioBlocked !== "true") return;
+      // Start on the loaded player before a swipe replaces it. The permission
+      // can be granted synchronously even if its play promise settles later.
+      const video = card.querySelector("[data-feed-video]");
+      if (stableAudioVideo && !stableAudioVideo.video) stableAudioVideo.video = video;
+      playFeedVideo(card);
+      return;
+    }
+    if (!stableAudioVideo || stableAudioVideo.video) return;
+    // Preserve the Soundbytes/login tap across the asynchronous feed request.
+    // This is the future foreground player, with no source, download or audio.
+    const video = feedStartupVideo || document.createElement("video");
+    feedStartupVideo = video;
+    video.playsInline = true;
+    video.muted = false;
+    video.play().catch(function () {});
+    video.pause();
+  }
+
+  function adoptFeedStartupVideo(slide) {
+    if (!feedStartupVideo) return;
+    const fresh = slide.querySelector("[data-feed-video]");
+    const video = feedStartupVideo;
+    feedStartupVideo = null;
+    for (const attribute of Array.from(fresh.attributes)) video.setAttribute(attribute.name, attribute.value);
+    fresh.replaceWith(video);
+  }
+
   function renderVideoVolumeControl(name) {
     return `
           <div class="feed-volume-control" data-feed-volume-control>
@@ -2748,6 +2786,7 @@
       const distance = touchStartY - event.changedTouches[0].clientY;
       touchStartY = null;
       if (Math.abs(distance) >= 48) {
+        beginFeedAudioGesture();
         const elapsed = Math.max(40, window.performance.now() - touchStartTime);
         const velocity = Math.min(1, Math.abs(distance) / elapsed / 1.2 + Math.abs(distance) / 400);
         navigateFeedBy(distance > 0 ? 1 : -1, velocity);
@@ -2763,9 +2802,11 @@
       }
       if (event.key === "ArrowDown" || event.key === "PageDown") {
         event.preventDefault();
+        beginFeedAudioGesture();
         navigateFeedBy(1, 0.55);
       } else if (event.key === "ArrowUp" || event.key === "PageUp") {
         event.preventDefault();
+        beginFeedAudioGesture();
         navigateFeedBy(-1, 0.55);
       }
     };
@@ -5160,11 +5201,13 @@
     navigate(routes.login);
   }
 
+  brandLink.addEventListener("click", function () { if (currentUser) beginFeedAudioGesture(); });
   primaryNav.addEventListener("click", function (event) {
     const link = event.target.closest("[data-route]");
     if (!link) {
       return;
     }
+    if (link.getAttribute("data-route") === routes.feed) beginFeedAudioGesture();
     if (link.getAttribute("data-route") === routes.search) {
       event.preventDefault();
       openSearchDrawer();

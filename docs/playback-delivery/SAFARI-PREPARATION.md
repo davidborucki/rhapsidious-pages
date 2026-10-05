@@ -97,3 +97,22 @@ to explicitly model element-scoped permission without granting it on scroll.
 all fixture API/media requests locally; it does not mutate production accounts.
 Playwright and ffmpeg must be available. These are browser-engine tests, not a
 claim of physical iPhone or cellular performance measurements.
+
+### First-entry audio — October 5, 2026
+
+Initialize the future foreground element synchronously inside the Soundbytes,
+brand, login or signup gesture, before awaiting feed/auth requests. With no source
+attached, this starts no media download or audio; the same element receives the
+first clip when ready. On a blocked feed, the Soundbytes tap and eligible keyboard
+or touch navigation retry the loaded current player before transitioning, retaining
+any permission granted before its play promise settles. Intentional mute skips
+this initialization entirely.
+
+Startup regression modes in `audio-continuity.browser.cjs`:
+`STARTUP_AUDIO=navigation`, `login`, or `direct`, with `STARTUP_ONLY=1` for a short
+run. Use WebKit plus `STRICT_AUDIO=1` to model element-scoped permission and delayed
+auth/feed responses. The direct-load case explicitly keeps playback muted for
+non-activating swipes, then enables sound through the Soundbytes tab. It does not
+pretend a swipe can bypass Safari's requirement for an initial tap. See WebKit's
+[documented drag/gesture behavior](https://bugs.webkit.org/show_bug.cgi?id=212117)
+and [play() gesture handling](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/html/HTMLMediaElement.cpp).

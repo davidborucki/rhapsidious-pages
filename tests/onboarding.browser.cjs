@@ -163,7 +163,10 @@ const http = require("node:http");
     assert.equal(new URL(page.url()).hash, "#/upload");
     const created = requests.filter(r => r.pathname === "/ios/users").at(-1).body;
     assert.equal(created.username, "newlistener"); assert.equal(created.gender, "MALE");
-    assert.equal(created.termsVersion, "2026-10-02");
+    assert.equal(created.termsVersion, "2026-11-25");
+    assert.equal(created.privacyVersion, "2026-11-25");
+    assert.equal(created.aiProcessingConsent, true);
+    assert.equal(created.aiConsentVersion, "2026-11-25");
     assert.deepEqual(errors, []);
     console.log("Entry checks passed: responsive flat layouts, login validation, password visibility, two-step signup and retained fields, email request/retry, reset/reload/expiry/success, and navigation races.");
   } catch (error) {

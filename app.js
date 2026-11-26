@@ -840,7 +840,7 @@
         <div id="signupAbout" class="auth-fields" hidden>
           <div class="field"><label for="signupDob">Date of birth</label><input id="signupDob" name="dob" type="date" autocomplete="bday" max="${getYesterdayDate()}" required /></div>
           <div class="field"><label for="signupGender">Gender</label><select id="signupGender" name="gender" required><option value="">Select</option><option value="MALE">Male</option><option value="FEMALE">Female</option></select></div>
-          <label class="checkbox-field auth-agreement"><input name="agreement" type="checkbox" required /><span>I agree to the <a href="./terms-of-service/" target="_blank" rel="noopener">Terms</a> and acknowledge the <a href="./privacy-policy/" target="_blank" rel="noopener">Privacy Policy</a>. I’m 13 or older, with a parent’s permission if I’m a minor.</span></label>
+          <label class="checkbox-field auth-agreement"><input name="agreement" type="checkbox" required /><span>I agree to the <a href="./terms-of-service/" target="_blank" rel="noopener">Terms</a> and acknowledge the <a href="./privacy-policy/" target="_blank" rel="noopener">Privacy Policy</a>. I allow Voxxly to automatically send my uploads’ audio and transcripts, including personal information in them, to OpenAI for transcription and topic labels. I’m 13 or older, with a parent’s permission if I’m a minor.</span></label>
         </div>
         ${renderStatus(null, "signupStatus")}
         <button id="signupSubmit" class="primary-button auth-submit" type="submit">Continue</button>
@@ -1144,7 +1144,7 @@
     document.getElementById("signupBack").disabled = true;
     setStatusMessage("signupStatus", null);
 
-    const registration = { email, username, password, gender, dob, termsVersion: "2026-10-02", privacyVersion: "2026-10-02" };
+    const registration = { email, username, password, gender, dob, termsVersion: "2026-11-25", privacyVersion: "2026-11-25", aiProcessingConsent: true, aiConsentVersion: "2026-11-25" };
 
     try {
       await requestJson(authConfig.registerPath || "/ios/users", {

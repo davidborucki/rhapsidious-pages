@@ -15,7 +15,7 @@
     if (field === "email") return [row("email-format", "A valid email address", value.trim().length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()))];
     if (field === "password") return [
       row("password-length", "At least 8 characters", count(value) >= 8),
-      row("password-limit", "72 bytes or fewer", new TextEncoder().encode(value).length <= 72),
+      row("password-limit", new TextEncoder().encode(value).length <= 72 ? "Not too long" : "Use a shorter password", new TextEncoder().encode(value).length <= 72),
       row("password-nonblank", "Not only spaces", value.trim().length > 0)
     ];
     if (field === "dob") {

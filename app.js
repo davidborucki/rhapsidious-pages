@@ -829,7 +829,7 @@
 
   function renderSignup() {
     const rules = window.VoxxlySignupRequirements;
-    const requirementMarkup = field => `<ul class="signup-requirements" id="requirements-${field}">${rules.requirements(field, field === "agreement" ? false : "").map(rule => `<li id="requirement-${rule.id}" data-state="untouched"><span class="requirement-dot" aria-hidden="true"></span><span>${rule.text}<span class="sr-only requirement-status">: Not checked</span></span></li>`).join("")}</ul>`;
+    const requirementMarkup = field => `<ul class="signup-requirements" id="requirements-${field}">${rules.requirements(field, field === "agreement" ? false : "").map(rule => `<li id="requirement-${rule.id}" data-state="untouched"><span class="requirement-dot" aria-hidden="true"></span><span><span class="requirement-label">${rule.text}</span><span class="sr-only requirement-status">: Not checked</span></span></li>`).join("")}</ul>`;
     app.innerHTML = `<section class="auth-page" aria-labelledby="signupTitle"><div class="auth-content">
       <header class="auth-heading"><div class="auth-step-row"><button id="signupBack" class="auth-back" type="button" aria-label="Back to account details" hidden>← Back</button><span id="signupStepLabel" class="auth-step">1 of 2</span></div><h1 id="signupTitle">Make it yours.</h1></header>
       <form id="signupForm" class="auth-form" novalidate>
@@ -840,7 +840,7 @@
           ${requirementMarkup("email")}
           ${passwordField("signupPassword", "Password", "new-password")}
           ${requirementMarkup("password")}
-          <span class="auth-hint">Symbols such as ! . _ - are allowed. Some characters use more than one byte.</span>
+          <span class="auth-hint">Symbols such as ! . _ - are allowed.</span>
         </div>
         <div id="signupAbout" class="auth-fields" hidden>
           <div class="field"><label for="signupDob">Date of birth</label><input id="signupDob" name="dob" type="date" autocomplete="bday" max="${getYesterdayDate()}" required /></div>
@@ -868,6 +868,7 @@
         const item = document.getElementById(`requirement-${rule.id}`);
         const state = rules.state(edited.has(field), rule.meets);
         item.dataset.state = state;
+        item.querySelector(".requirement-label").textContent = rule.text;
         item.querySelector(".requirement-status").textContent = `: ${rules.statusText(state)}`;
       }
     };

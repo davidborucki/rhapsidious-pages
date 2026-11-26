@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const rules = require('../signup-requirements.js');
+test('password messages use everyday language', () => {
+  assert.equal(rules.requirements('password', '').find(r => r.id === 'password-limit').text, 'Not too long');
+  assert.equal(rules.requirements('password', 'x'.repeat(73)).find(r => r.id === 'password-limit').text, 'Use a shorter password');
+  for (const value of ['', 'Test!._-123', '😀'.repeat(19)]) {
+    for (const rule of rules.requirements('password', value)) assert.doesNotMatch(rule.text, /bytes|UTF-8/i);
+  }
+});
 test('untouched, invalid, valid and cleared-after-edit states', () => {
   assert.equal(rules.state(false, false), 'untouched');
   assert.equal(rules.state(false, true), 'untouched');

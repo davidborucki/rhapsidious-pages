@@ -828,19 +828,26 @@
   }
 
   function renderSignup() {
+    const rules = window.VoxxlySignupRequirements;
+    const requirementMarkup = field => `<ul class="signup-requirements" id="requirements-${field}">${rules.requirements(field, field === "agreement" ? false : "").map(rule => `<li id="requirement-${rule.id}" data-state="untouched"><span class="requirement-dot" aria-hidden="true"></span><span>${rule.text}<span class="sr-only requirement-status">: Not checked</span></span></li>`).join("")}</ul>`;
     app.innerHTML = `<section class="auth-page" aria-labelledby="signupTitle"><div class="auth-content">
       <header class="auth-heading"><div class="auth-step-row"><button id="signupBack" class="auth-back" type="button" aria-label="Back to account details" hidden>← Back</button><span id="signupStepLabel" class="auth-step">1 of 2</span></div><h1 id="signupTitle">Make it yours.</h1></header>
       <form id="signupForm" class="auth-form" novalidate>
         <div id="signupAccount" class="auth-fields">
           <div class="field"><label for="signupUsername">Username</label><input id="signupUsername" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="32" pattern="[A-Za-z0-9._-]{3,32}" required /></div>
+          ${requirementMarkup("username")}
           <div class="field"><label for="signupEmail">Email</label><input id="signupEmail" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" required /></div>
+          ${requirementMarkup("email")}
           ${passwordField("signupPassword", "Password", "new-password")}
-          <span class="auth-hint">At least 8 characters.</span>
+          ${requirementMarkup("password")}
+          <span class="auth-hint">Symbols such as ! . _ - are allowed. Some characters use more than one byte.</span>
         </div>
         <div id="signupAbout" class="auth-fields" hidden>
           <div class="field"><label for="signupDob">Date of birth</label><input id="signupDob" name="dob" type="date" autocomplete="bday" max="${getYesterdayDate()}" required /></div>
+          ${requirementMarkup("dob")}
           <div class="field"><label for="signupGender">Gender</label><select id="signupGender" name="gender" required><option value="">Select</option><option value="MALE">Male</option><option value="FEMALE">Female</option></select></div>
           <label class="checkbox-field auth-agreement"><input name="agreement" type="checkbox" required /><span>I agree to the <a href="./terms-of-service/" target="_blank" rel="noopener">Terms</a> and acknowledge the <a href="./privacy-policy/" target="_blank" rel="noopener">Privacy Policy</a>. I allow Voxxly to automatically send my uploads’ audio and transcripts, including personal information in them, to OpenAI for transcription and topic labels. I’m 13 or older, with a parent’s permission if I’m a minor.</span></label>
+          ${requirementMarkup("agreement")}
         </div>
         ${renderStatus(null, "signupStatus")}
         <button id="signupSubmit" class="primary-button auth-submit" type="submit">Continue</button>
@@ -849,6 +856,26 @@
       ${authFooterMarkup()}
     </div></section>`;
     const form = document.getElementById("signupForm");
+    const edited = new Set();
+    const inputs = { username: form.username, email: form.email, password: form.signupPassword, dob: form.dob, agreement: form.agreement };
+    if (form.gender.required) {
+      form.gender.closest(".field").insertAdjacentHTML("afterend", requirementMarkup("gender"));
+      inputs.gender = form.gender;
+    }
+    const updateRequirements = field => {
+      const input = inputs[field];
+      for (const rule of rules.requirements(field, field === "agreement" ? input.checked : input.value)) {
+        const item = document.getElementById(`requirement-${rule.id}`);
+        const state = rules.state(edited.has(field), rule.meets);
+        item.dataset.state = state;
+        item.querySelector(".requirement-status").textContent = `: ${rules.statusText(state)}`;
+      }
+    };
+    for (const [field, input] of Object.entries(inputs)) {
+      input.setAttribute("aria-describedby", `requirements-${field}`);
+      for (const event of ["input", "change"]) input.addEventListener(event, () => { edited.add(field); updateRequirements(field); });
+    }
+    form.checkRequirements = fields => { for (const field of fields) { edited.add(field); updateRequirements(field); } };
     form.dataset.step = "1";
     const setStep = step => {
       form.dataset.step = String(step);
@@ -1097,22 +1124,24 @@
     const form = event.currentTarget;
     const submitButton = document.getElementById("signupSubmit");
     if (submitButton.disabled) return;
-    const username = form.username.value.trim();
+    const username = form.username.value;
     const email = form.email.value.trim();
     const password = form.signupPassword.value;
     const dob = form.dob.value;
     const gender = form.gender.value;
+    const rules = window.VoxxlySignupRequirements;
+    form.checkRequirements(form.dataset.step === "1" ? ["username", "email", "password"] : ["dob", "agreement", ...(form.gender.required ? ["gender"] : [])]);
 
     if (!/^[A-Za-z0-9._-]{3,32}$/.test(username)) {
       setStatusMessage("signupStatus", { type: "error", message: "Use 3–32 letters, numbers, dots, underscores or dashes." });
       return;
     }
-    if (!form.email.validity.valid) {
+    if (!form.email.validity.valid || !rules.valid("email", email)) {
       setStatusMessage("signupStatus", { type: "error", message: "Enter a valid email address." });
       return;
     }
-    if (password.length < 8 || new TextEncoder().encode(password).length > 72) {
-      setStatusMessage("signupStatus", { type: "error", message: password.length < 8 ? "Use at least 8 characters." : "Try a shorter password." });
+    if (!rules.valid("password", password)) {
+      setStatusMessage("signupStatus", { type: "error", message: "Check the password requirements below the field." });
       return;
     }
     if (form.dataset.step === "1") { form.setStep(2); return; }
